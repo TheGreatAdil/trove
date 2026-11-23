@@ -4,7 +4,15 @@
 /* ───────── helpers ───────── */
 const $ = (s, el = document) => el.querySelector(s);
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+const isWin = /Win/.test(navigator.platform);
 const MOD = isMac ? '⌘' : 'Ctrl';
+const TRASH = isWin ? 'Recycle Bin' : 'Trash';
+const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const errMsg = e => (typeof e === 'string' ? e : e && e.message) || 'Something went wrong';
+
+const { invoke, convertFileSrc } = window.__TAURI__.core;
+const dialog = window.__TAURI__.dialog;
+const appWindow = window.__TAURI__.window.getCurrentWindow();
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const DAY = 864e5;
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -31,77 +39,30 @@ function groupOf(t) {
   return 'Earlier';
 }
 
-/* ───────── storage (IndexedDB, falls back to memory) ───────── */
-let db = null;
-function openDB() {
-  return new Promise(res => {
-    try {
-      const r = indexedDB.open('trove-design', 1);
-      r.onupgradeneeded = () => {
-        const d = r.result;
-        d.createObjectStore('boards', { keyPath: 'id' });
-        d.createObjectStore('items', { keyPath: 'id' }).createIndex('board', 'boardId');
-      };
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => res(null);
-    } catch { res(null); }
-  });
-}
-const P = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-const store = (n, m = 'readonly') => db.transaction(n, m).objectStore(n);
-const dbAll = n => db ? P(store(n).getAll()) : Promise.resolve([]);
-const dbPut = (n, v) => db ? P(store(n, 'readwrite').put(v)).catch(console.warn) : Promise.resolve();
-const dbDel = (n, k) => db ? P(store(n, 'readwrite').delete(k)).catch(console.warn) : Promise.resolve();
-
 /* ───────── state ───────── */
 const state = {
   boards: [], items: [], active: null,
   colTarget: +(localStorage.getItem('trove.col') || 210),
   query: '', hovered: null,
 };
-const urls = new Map(); // item id -> object URL
+
+/* The open project. Its images live unpacked in `dir` (a session folder the
+   Rust side manages) until the project is saved back into its .trv file. */
+const project = { path: null, dir: '', sep: '/', dirty: false, rev: 0 };
+
+// Images stored in the project are shown straight from disk via the asset
+// protocol. Links that couldn't be downloaded keep their web address in `src`.
+const urls = new Map(); // item id -> display URL
 function srcOf(it) {
-  if (it.blob) {
-    if (!urls.has(it.id)) urls.set(it.id, URL.createObjectURL(it.blob));
-    return urls.get(it.id);
-  }
-  return it.src;
+  if (!it.file) return it.src;
+  if (!urls.has(it.id)) urls.set(it.id, convertFileSrc([project.dir, 'images', it.file].join(project.sep)));
+  return urls.get(it.id);
 }
-const thumbOf = it => it.thumb || srcOf(it);
+const thumbOf = srcOf;
 const sortKey = it => it.pos ?? it.createdAt; // manual order wins once a card has been dragged
 const byId = id => state.items.find(i => i.id === id);
 const boardItems = (id = state.active) => state.items.filter(i => i.boardId === id).sort((a, b) => sortKey(b) - sortKey(a));
 const activeBoard = () => state.boards.find(b => b.id === state.active);
-
-/* ───────── demo seed ───────── */
-const pic = (id, w, h) => `https://picsum.photos/id/${id}/${w}/${h}`;
-const SEED = [
-  { name: 'Slow light', ago: 2 / 1440, items: [[240,2,3],[133,4,5],[315,3,4],[22,4,3],[63,1,1],[196,3,2],[31,4,5],[101,3,4],[78,2,3],[153,4,5],[184,16,10],[145,3,4],[248,1,1],[276,2,3],[43,3,2],[108,4,5],[311,3,4],[312,4,5],[261,3,2],[32,4,3],[175,1,1],[250,4,3],[237,4,5],[212,2,3],[106,3,4],[102,3,2],[23,4,5],[210,1,1]] },
-  { name: 'Concrete & shadow', ago: .18, items: [[315,2,3],[240,3,4],[101,4,5],[32,3,2],[276,3,4],[134,4,3],[230,2,3],[193,3,2],[221,3,4],[137,1,1],[153,2,3]] },
-  { name: 'Desert palette', ago: 1.1, items: [[196,3,2],[261,4,5],[247,3,4],[184,2,3],[116,3,2],[108,3,4],[100,4,3],[77,4,5]] },
-  { name: 'Monochrome', ago: 3.4, items: [[23,4,5],[31,3,4],[43,3,2],[47,4,3],[58,3,4],[79,3,2],[80,1,1],[91,2,3],[99,4,5],[175,1,1],[238,3,4],[72,4,3]] },
-  { name: 'Still life', ago: 5.2, items: [[63,4,5],[312,3,4],[225,1,1],[39,3,2],[145,2,3],[250,4,3],[248,4,5],[102,3,2],[157,3,4]] },
-  { name: 'Night drives', ago: 12, items: [[84,3,2],[232,2,3],[53,4,5],[209,1,1],[96,3,2],[122,16,9],[223,3,4]] },
-  { name: 'Coastline studies', ago: 19, items: [[37,3,2],[51,4,3],[77,2,3],[266,3,2],[279,4,5],[280,3,2],[302,3,4],[14,4,3]] },
-  { name: 'Packaging — Kōri tea', ago: 46, items: [[225,4,5],[312,1,1],[30,3,4],[63,3,2],[20,4,3]] },
-];
-async function seed() {
-  const now = Date.now();
-  SEED.forEach((s, bi) => {
-    const updated = now - s.ago * DAY;
-    const b = { id: uid(), name: s.name, createdAt: updated - 20 * DAY, updatedAt: updated };
-    state.boards.push(b);
-    s.items.forEach(([pid, rw, rh], i) => {
-      const w = 640, h = Math.round(640 * rh / rw);
-      state.items.push({
-        id: uid(), boardId: b.id, src: pic(pid, w, h), thumb: pic(pid, 64, 64),
-        w, h, color: null, createdAt: updated - i * 3.7e6, demo: true,
-      });
-    });
-    if (bi === 0) state.active = b.id;
-  });
-  await Promise.all([...state.boards.map(b => dbPut('boards', b)), ...state.items.map(i => dbPut('items', i))]);
-}
 
 /* ───────── elements ───────── */
 const app = $('#app'), stage = $('#stage'), grid = $('#grid'), scroll = $('#scroll'), listEl = $('#boardList');
@@ -145,7 +106,7 @@ function renderSidebar() {
     a.append(th, nm, ct, mo);
     listEl.append(a);
   }
-  $('#libStat').innerHTML = `<b>${plural(state.items.length, 'reference')}</b><br>Stored on this device`;
+  renderProject();
 }
 
 listEl.addEventListener('click', e => {
@@ -202,7 +163,6 @@ function renderHead() {
   countEl.title = plural(n, 'reference');
   updatedEl.textContent = n ? `Updated ${ago(b.updatedAt)}` : `Created ${ago(b.createdAt)}`;
   $('#dropTo').textContent = `to ${b.name}`;
-  document.title = `${b.name} — Trove`;
 }
 titleEl.addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); }
@@ -211,7 +171,7 @@ titleEl.addEventListener('keydown', e => {
 titleEl.addEventListener('blur', () => {
   const b = activeBoard(); if (!b) return;
   const v = titleEl.textContent.replace(/\s+/g, ' ').trim();
-  if (v && v !== b.name) { b.name = v; dbPut('boards', b); renderSidebar(); }
+  if (v && v !== b.name) { b.name = v; touch(); renderSidebar(); }
   titleEl.textContent = b.name; renderHead();
   titleEl.scrollLeft = 0;
 });
@@ -283,11 +243,12 @@ function makeCard(it) {
   if (it.color) inner.style.setProperty('--ph', it.color);
   const img = new Image();
   img.alt = ''; img.decoding = 'async'; img.draggable = false;
-  if (!it.blob && !it.tone && it.cors !== false) img.crossOrigin = 'anonymous';
+  // Web links: try a CORS load so colours can be sampled, and fall back to a plain load.
+  if (!it.file && !it.tone && it.cors !== false) img.crossOrigin = 'anonymous';
   img.onerror = () => { if (img.crossOrigin) { img.removeAttribute('crossorigin'); it.cors = false; img.src = srcOf(it); } };
   img.onload = () => {
     img.classList.add('loaded');
-    if (!it.color || !it.tone) { try { Object.assign(it, readColors(img)); inner.style.setProperty('--ph', it.color); dbPut('items', it); schedulePalette(); } catch {} }
+    if (!it.color || !it.tone) { try { Object.assign(it, readColors(img)); inner.style.setProperty('--ph', it.color); schedulePalette(); } catch {} }
   };
   img.src = srcOf(it);
   const ui = document.createElement('div'); ui.className = 'card-ui';
@@ -512,20 +473,21 @@ function finishDrag(cancel) {
 
 function commitOrder(order) {
   const base = Date.now();
-  order.forEach((id, i) => { const it = byId(id); if (!it) return; it.pos = base - i; dbPut('items', it); });
+  order.forEach((id, i) => { const it = byId(id); if (it) it.pos = base - i; });
+  touch();
   renderSidebar();
 }
 
 function moveItem(it, boardId) {
   const fromBoard = it.boardId, fromPos = it.pos;
   const b = state.boards.find(x => x.id === boardId);
-  it.boardId = boardId; it.pos = Date.now(); dbPut('items', it);
-  b.updatedAt = Date.now(); dbPut('boards', b);
+  it.boardId = boardId; it.pos = Date.now();
+  b.updatedAt = Date.now(); touch();
   renderGrid({ animate: true }); renderHead(); renderSidebar();
   toast(`Moved to ${b.name}`, {
     thumb: thumbOf(it), action: 'Undo',
     onAction: () => {
-      it.boardId = fromBoard; it.pos = fromPos; dbPut('items', it);
+      it.boardId = fromBoard; it.pos = fromPos; touch();
       if (fromBoard === state.active) renderGrid({ fresh: new Set([it.id]), animate: true });
       renderHead(); renderSidebar();
     },
@@ -569,16 +531,31 @@ function readColors(src) {
   return { color: `rgb(${r / n | 0}, ${g / n | 0}, ${b / n | 0})`, tone: best.map(v => v | 0) };
 }
 const hex = rgb => '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('');
+const EXT = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif',
+  'image/bmp': 'bmp', 'image/svg+xml': 'svg', 'image/x-icon': 'ico', 'image/vnd.microsoft.icon': 'ico',
+};
+const MIME = Object.fromEntries(Object.entries(EXT).map(([m, e]) => [e, m]));
+function extOf(blob) {
+  if (EXT[blob.type]) return EXT[blob.type];
+  const m = /\.([a-z0-9]{1,5})$/i.exec(blob.name || '');
+  return m ? m[1].toLowerCase() : 'png';
+}
+// Reads size and colours, then stores the image in the project folder.
 async function itemFromBlob(blob, source = null) {
   const bmp = await createImageBitmap(blob);
-  const it = { id: uid(), boardId: state.active, blob, w: bmp.width, h: bmp.height, ...readColors(bmp), createdAt: Date.now(), source };
+  const id = uid(), file = `${id}.${extOf(blob)}`;
+  const it = { id, boardId: state.active, file, w: bmp.width, h: bmp.height, ...readColors(bmp), createdAt: Date.now(), source };
   bmp.close && bmp.close();
+  await invoke('image_put', new Uint8Array(await blob.arrayBuffer()), { headers: { 'x-file': file } });
   return it;
 }
 async function addFiles(files) {
   const out = [];
-  for (const f of files) { try { out.push(await itemFromBlob(f)); } catch (err) { console.warn('Skipped file', err); } }
-  if (out.length) commit(out); else toast('That file isn’t an image Trove can read');
+  let failed = null;
+  for (const f of files) { try { out.push(await itemFromBlob(f)); } catch (err) { console.warn('Skipped file', err); failed = err; } }
+  if (out.length) commit(out);
+  else toast(typeof failed === 'string' ? failed : 'That file isn’t an image Trove can read');
 }
 async function addUrl(url) {
   try {
@@ -588,23 +565,27 @@ async function addUrl(url) {
     commit([await itemFromBlob(blob, url)]);
   } catch {
     const img = new Image();
-    img.onload = () => commit([{ id: uid(), boardId: state.active, src: url, w: img.naturalWidth, h: img.naturalHeight, color: null, cors: false, createdAt: Date.now(), source: url }]);
+    // The site blocks downloads, so keep it as a link. It needs a connection to show.
+    img.onload = () => commit([{ id: uid(), boardId: state.active, src: url, w: img.naturalWidth, h: img.naturalHeight, color: null, cors: false, createdAt: Date.now(), source: url }], { linked: true });
     img.onerror = () => toast('Couldn’t find an image at that link');
     img.src = url;
   }
 }
-function commit(newItems) {
+function commit(newItems, { linked = false } = {}) {
   const b = activeBoard(); const now = Date.now();
-  newItems.forEach((it, i) => { it.createdAt = now + i; it.pos = now + i; state.items.push(it); dbPut('items', it); });
-  b.updatedAt = now; dbPut('boards', b);
+  newItems.forEach((it, i) => { it.createdAt = now + i; it.pos = now + i; state.items.push(it); });
+  b.updatedAt = now; touch();
   if (scroll.scrollTop > 0) scroll.scrollTo({ top: 0, behavior: 'smooth' });
   renderGrid({ fresh: new Set(newItems.map(i => i.id)), animate: true });
   renderHead(); renderSidebar();
   const last = newItems[newItems.length - 1];
-  toast(newItems.length === 1 ? `Added to ${b.name}` : `Added ${newItems.length} images to ${b.name}`, { thumb: thumbOf(last) });
+  const msg = linked ? `Added to ${b.name} as a web link`
+    : newItems.length === 1 ? `Added to ${b.name}` : `Added ${newItems.length} images to ${b.name}`;
+  toast(msg, { thumb: thumbOf(last) });
 }
 
 document.addEventListener('paste', e => {
+  if (modal.classList.contains('open')) return;
   const t = e.target;
   const editing = t instanceof Element && t.closest('input, textarea, [contenteditable="true"]');
   const dt = e.clipboardData; if (!dt) return;
@@ -632,6 +613,9 @@ window.addEventListener('dragover', e => { if (dragOk(e)) e.preventDefault(); })
 window.addEventListener('drop', e => {
   if (!dragOk(e)) return;
   e.preventDefault(); dragDepth = 0; drop.classList.remove('on');
+  if ([...e.dataTransfer.files].some(f => /\.trv$/i.test(f.name))) {
+    return toast(`Open projects with ${MOD} O, or double-click the file`);
+  }
   const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
   if (files.length) return addFiles(files);
   const url = (e.dataTransfer.getData('text/uri-list') || '').split('\n').find(l => /^https?:/.test(l));
@@ -642,8 +626,8 @@ window.addEventListener('drop', e => {
 const undo = [];
 function removeItem(it) {
   state.items = state.items.filter(i => i !== it);
-  dbDel('items', it.id);
-  undo.push(it);
+  touch();
+  undo.push(it); // its file stays in the session folder, so undo can bring it back
   if (focus.classList.contains('open')) { const list = boardItems(); if (!list.length) closeFocus(); else { focusIdx = Math.min(focusIdx, list.length - 1); showFocus(); } }
   renderGrid({ animate: true }); renderHead(); renderSidebar();
   toast('Image removed', { action: 'Undo', onAction: restore });
@@ -651,16 +635,26 @@ function removeItem(it) {
 function restore() {
   const it = undo.pop(); if (!it) return;
   if (!state.boards.find(b => b.id === it.boardId)) return;
-  state.items.push(it); dbPut('items', it);
+  state.items.push(it); touch();
   if (it.boardId === state.active) { renderGrid({ fresh: new Set([it.id]), animate: true }); renderHead(); }
   renderSidebar(); toast('Restored');
 }
+// Project images are read through Rust: drawing an asset-protocol image onto a
+// canvas could taint it and block the PNG export.
+async function blobOf(it) {
+  if (it.file) {
+    const ext = it.file.split('.').pop();
+    return new Blob([await invoke('image_read', { file: it.file })], { type: MIME[ext] || '' });
+  }
+  return (await fetch(it.src, { mode: 'cors' })).blob();
+}
 async function toPng(it) {
-  if (it.blob && it.blob.type === 'image/png') return it.blob;
-  const img = new Image(); img.crossOrigin = 'anonymous'; img.src = srcOf(it);
-  await img.decode();
-  const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
-  c.getContext('2d').drawImage(img, 0, 0);
+  const blob = await blobOf(it);
+  if (blob.type === 'image/png') return blob;
+  const bmp = await createImageBitmap(blob);
+  const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+  c.getContext('2d').drawImage(bmp, 0, 0);
+  bmp.close && bmp.close();
   return new Promise(r => c.toBlob(r, 'image/png'));
 }
 async function copyItem(it) {
@@ -704,9 +698,9 @@ function selectBoard(id) {
   if (id === state.active) return;
   const prev = activeBoard();
   if (prev && prev.name === 'Untitled board' && !boardItems(prev.id).length && state.boards.length > 1) {
-    state.boards = state.boards.filter(b => b !== prev); dbDel('boards', prev.id);
+    state.boards = state.boards.filter(b => b !== prev); touch();
   }
-  state.active = id; localStorage.setItem('trove.active', id);
+  state.active = id;
   closeMenu();
   if (app.classList.contains('narrow')) app.classList.add('collapsed');
   clearGrid(); scroll.scrollTop = 0; updateHeader();
@@ -717,7 +711,7 @@ function selectBoard(id) {
 function newBoard() {
   const now = Date.now();
   const b = { id: uid(), name: 'Untitled board', createdAt: now, updatedAt: now };
-  state.boards.push(b); dbPut('boards', b);
+  state.boards.push(b); touch();
   state.query = ''; searchEl.value = '';
   selectBoard(b.id);
   requestAnimationFrame(() => {
@@ -728,9 +722,8 @@ function newBoard() {
 }
 function deleteBoard(id) {
   state.boards = state.boards.filter(b => b.id !== id);
-  state.items.filter(i => i.boardId === id).forEach(i => dbDel('items', i.id));
   state.items = state.items.filter(i => i.boardId !== id);
-  dbDel('boards', id);
+  touch();
   if (!state.boards.length) return newBoard();
   if (id === state.active) {
     const next = [...state.boards].sort((a, b) => b.updatedAt - a.updatedAt)[0];
@@ -748,17 +741,65 @@ function openBoardMenu(id, anchor, linkEl) {
     <button data-m="rename"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M10.5 2.5 13.5 5.5 6 13H3v-3z"/></svg>Rename</button>
     <button data-m="delete" class="danger"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 8.4a1.5 1.5 0 0 0 1.5 1.35h3.3a1.5 1.5 0 0 0 1.5-1.35l.6-8.4"/></svg><span>Delete board</span></button>`;
   const r = anchor.getBoundingClientRect();
-  menu.style.left = Math.min(r.left, innerWidth - 184) + 'px'; menu.style.top = (r.bottom + 6) + 'px';
+  menu.classList.remove('wide');
+  menu.style.left = Math.min(r.left, innerWidth - 184) + 'px'; menu.style.top = (r.bottom + 6) + 'px'; menu.style.bottom = '';
   menu.style.transformOrigin = 'top left';
   requestAnimationFrame(() => menu.classList.add('open'));
 }
+
+const ICON = {
+  new: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg>',
+  open: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2.25 4.25a1.5 1.5 0 0 1 1.5-1.5h2.6l1.4 1.5h4.5a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5h-8.5a1.5 1.5 0 0 1-1.5-1.5z"/></svg>',
+  save: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.75v7.5M5 7.5l3 3 3-3M3 12.75h10"/></svg>',
+  saveAs: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M10.5 2.5 13.5 5.5 6 13H3v-3z"/></svg>',
+  file: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M4.25 2.25h5l2.5 2.5v9h-7.5z"/><path d="M9.25 2.25v2.5h2.5"/></svg>',
+  trash: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 8.4a1.5 1.5 0 0 0 1.5 1.35h3.3a1.5 1.5 0 0 0 1.5-1.35l.6-8.4"/></svg>',
+};
+const projectBtn = $('#projectBtn');
+function openProjectMenu() {
+  if (menuFor === 'project' && menu.classList.contains('open')) return closeMenu();
+  closeMenu();
+  menuFor = 'project'; projectBtn.classList.add('menu-open');
+  const others = recent().filter(p => !samePath(p, project.path)).slice(0, 6);
+  const item = (m, icon, label, kbd, extra = '') =>
+    `<button data-m="${m}" ${extra}>${icon}<span class="grow">${label}</span>${kbd ? `<span class="kbd">${kbd}</span>` : ''}</button>`;
+  menu.innerHTML = [
+    item('new', ICON.new, 'New project', `${MOD} Shift N`),
+    item('open', ICON.open, 'Open…', `${MOD} O`),
+    item('save', ICON.save, 'Save', `${MOD} S`),
+    item('save-as', ICON.saveAs, 'Save as…', `${MOD} Shift S`),
+    others.length ? '<div class="menu-sep"></div><div class="menu-label">Recent</div>' : '',
+    ...others.map(p => item('recent', ICON.file, esc(baseName(p)), '', `data-path="${esc(p)}" title="${esc(p)}"`)),
+    '<div class="menu-sep"></div>',
+    `<button data-m="delete-project" class="danger">${ICON.trash}<span>${project.path ? 'Delete project…' : 'Discard project…'}</span></button>`,
+  ].join('');
+  const r = projectBtn.getBoundingClientRect();
+  menu.classList.add('wide');
+  menu.style.left = r.left + 'px'; menu.style.top = 'auto'; menu.style.bottom = (innerHeight - r.top + 6) + 'px';
+  menu.style.transformOrigin = 'bottom left';
+  requestAnimationFrame(() => menu.classList.add('open'));
+}
+projectBtn.addEventListener('click', e => { e.stopPropagation(); openProjectMenu(); });
+
 function closeMenu() {
   menu.classList.remove('open'); menuFor = null;
   listEl.querySelectorAll('.menu-open').forEach(el => el.classList.remove('menu-open'));
+  projectBtn.classList.remove('menu-open');
 }
 menu.addEventListener('click', e => {
   const btn = e.target.closest('[data-m]'); if (!btn || !menuFor) return;
   const id = menuFor;
+  if (id === 'project') {
+    closeMenu();
+    const m = btn.dataset.m;
+    if (m === 'new') exclusive(newProject);
+    else if (m === 'open') exclusive(() => openProject());
+    else if (m === 'save') exclusive(() => saveProject());
+    else if (m === 'save-as') exclusive(() => saveProject({ as: true }));
+    else if (m === 'recent') exclusive(() => openProject(btn.dataset.path));
+    else if (m === 'delete-project') exclusive(deleteProject);
+    return;
+  }
   if (btn.dataset.m === 'rename') {
     closeMenu();
     if (id !== state.active) selectBoard(id);
@@ -799,6 +840,203 @@ function showFocus() {
 function closeFocus() { focus.classList.remove('open'); focus.setAttribute('aria-hidden', 'true'); }
 function stepFocus(d) { const n = boardItems().length; if (!n) return; focusIdx = (focusIdx + d + n) % n; showFocus(); }
 focus.addEventListener('click', e => { if (e.target === focus || e.target.classList.contains('focus-stage')) closeFocus(); });
+
+/* ───────── projects ───────── */
+const modal = $('#modal'), sideFoot = $('#sideFoot');
+const FILTERS = [{ name: 'Trove project', extensions: ['trv'] }];
+const fileName = p => p.split(/[\\/]/).pop();
+const baseName = p => fileName(p).replace(/\.trv$/i, '');
+const projectName = () => project.path ? baseName(project.path) : 'Untitled project';
+const samePath = (a, b) => !!a && !!b && (isWin ? a.toLowerCase() === b.toLowerCase() : a === b);
+const hasWork = () => project.dirty && (project.path || state.items.length > 0);
+
+// Recently opened or saved projects, newest first.
+function recent() {
+  try { const r = JSON.parse(localStorage.getItem('trove.recent')); return Array.isArray(r) ? r.filter(p => typeof p === 'string') : []; }
+  catch { return []; }
+}
+function remember(path) { localStorage.setItem('trove.recent', JSON.stringify([path, ...recent().filter(p => !samePath(p, path))].slice(0, 10))); }
+function forget(path) { localStorage.setItem('trove.recent', JSON.stringify(recent().filter(p => !samePath(p, path)))); }
+
+let shownTitle = '';
+function renderProject() {
+  const name = projectName();
+  $('#projectName').textContent = name;
+  projectBtn.title = project.path || 'Not saved yet';
+  const status = project.dirty ? 'Unsaved changes' : project.path ? 'Saved' : 'Not saved yet';
+  $('#projectStatus').textContent = `${plural(state.items.length, 'reference')} · ${status}`;
+  sideFoot.classList.toggle('dirty', project.dirty);
+  const title = `${project.dirty ? '*' : ''}${name} — Trove`;
+  if (title !== shownTitle) { shownTitle = title; document.title = title; appWindow.setTitle(title).catch(() => {}); }
+}
+
+// Every edit to boards or images goes through here.
+function touch() { project.rev++; project.dirty = true; renderProject(); }
+
+function manifest() {
+  return {
+    format: 'trove', version: 1, savedAt: Date.now(), activeBoard: state.active,
+    boards: state.boards.map(({ id, name, createdAt, updatedAt }) => ({ id, name, createdAt, updatedAt })),
+    items: state.items.map(({ id, boardId, file, src, w, h, color, tone, createdAt, pos, source }) =>
+      ({ id, boardId, file, src, w, h, color, tone, createdAt, pos, source })),
+  };
+}
+
+// Swaps in a project returned by project_new / project_open.
+function loadProject({ dir, manifest: m }, path) {
+  Object.assign(project, { path, dir, sep: dir.includes('\\') ? '\\' : '/', dirty: false, rev: 0 });
+  urls.clear(); undo.length = 0;
+  const now = Date.now();
+  state.boards = (m && Array.isArray(m.boards) ? m.boards : [])
+    .filter(b => b && b.id)
+    .map(b => ({ id: String(b.id), name: String(b.name || 'Untitled board'), createdAt: +b.createdAt || now, updatedAt: +b.updatedAt || now }));
+  if (!state.boards.length) state.boards.push({ id: uid(), name: 'Untitled board', createdAt: now, updatedAt: now });
+  const ids = new Set(state.boards.map(b => b.id));
+  state.items = (m && Array.isArray(m.items) ? m.items : [])
+    .filter(i => i && i.id && ids.has(i.boardId) && (i.file || i.src) && i.w > 0 && i.h > 0);
+  state.active = m && ids.has(m.activeBoard) ? m.activeBoard : [...state.boards].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
+  state.query = ''; searchEl.value = '';
+  closeFocus(); closeMenu(); clearGrid();
+  scroll.scrollTop = 0; updateHeader();
+  head.classList.remove('swap'); void head.offsetWidth; head.classList.add('swap');
+  renderHead(); renderSidebar(); renderGrid({ entrance: true, recount: true }); resetDock();
+}
+
+// One project operation at a time (saving while a dialog is open, double shortcuts...).
+let busy = false;
+async function exclusive(fn) {
+  if (busy) return;
+  busy = true;
+  try { await fn(); }
+  catch (e) { console.error(e); toast(errMsg(e)); }
+  finally { busy = false; }
+}
+
+// Asks before unsaved work is thrown away. Resolves true when it's fine to go on.
+async function guardUnsaved() {
+  if (!hasWork()) return true;
+  const choice = await confirmDialog({
+    title: `Save changes to “${projectName()}”?`,
+    body: 'Your changes will be lost if you don’t save them.',
+    buttons: [
+      { label: 'Don’t save', value: 'discard', start: true },
+      { label: 'Cancel', value: 'cancel', cancel: true },
+      { label: 'Save', value: 'save', kind: 'primary', focus: true },
+    ],
+  });
+  if (choice === 'save') return saveProject();
+  return choice === 'discard';
+}
+
+async function newProject() {
+  if (!await guardUnsaved()) return;
+  loadProject(await invoke('project_new'), null);
+}
+
+async function openProject(path) {
+  if (!path) {
+    path = await dialog.open({ title: 'Open project', filters: FILTERS, multiple: false, directory: false });
+    if (!path) return;
+  }
+  if (samePath(path, project.path) && !project.dirty) return toast(`${projectName()} is already open`);
+  if (!await guardUnsaved()) return;
+  try {
+    loadProject(await invoke('project_open', { path }), path);
+    remember(path);
+    toast(`Opened ${projectName()}`);
+  } catch (e) {
+    const msg = errMsg(e);
+    if (/no longer exists/.test(msg)) forget(path);
+    toast(msg);
+  }
+}
+
+// Resolves true once the project is safely on disk.
+async function saveProject({ as = false } = {}) {
+  if (document.activeElement === titleEl) titleEl.blur(); // keep a rename in progress
+  let path = project.path;
+  if (as || !path) {
+    path = await dialog.save({ title: 'Save project', filters: FILTERS, defaultPath: project.path || `${projectName()}.trv` });
+    if (!path) return false;
+  }
+  const rev = project.rev;
+  try {
+    const res = await invoke('project_save', { path, manifest: manifest() });
+    project.path = res.path;
+    project.dirty = project.rev !== rev; // edits made while saving still count
+    remember(res.path);
+    renderProject();
+    toast(res.missing ? `Saved, but ${plural(res.missing, 'image')} couldn’t be found` : `Saved ${projectName()}`);
+    return true;
+  } catch (e) {
+    toast(errMsg(e));
+    return false;
+  }
+}
+
+// Saved projects go to the Recycle Bin / Trash; unsaved ones are discarded.
+async function deleteProject() {
+  const path = project.path, name = projectName();
+  if (!path && !hasWork()) return toast('Nothing to discard yet');
+  const ok = await confirmDialog(path ? {
+    title: `Delete “${name}”?`,
+    body: `${fileName(path)} will be moved to the ${TRASH}. You can restore it from there.`,
+    buttons: [{ label: 'Cancel', value: false, cancel: true, focus: true }, { label: 'Delete', value: true, kind: 'danger' }],
+  } : {
+    title: 'Discard this project?',
+    body: 'It hasn’t been saved, so its boards and images will be gone.',
+    buttons: [{ label: 'Cancel', value: false, cancel: true, focus: true }, { label: 'Discard', value: true, kind: 'danger' }],
+  });
+  if (!ok) return;
+  if (path) { await invoke('project_delete', { path }); forget(path); }
+  loadProject(await invoke('project_new'), null);
+  toast(path ? `Moved ${name} to the ${TRASH}` : 'Project discarded');
+}
+
+/* In-app dialog. Resolves with the clicked button's value, or the cancel
+   button's value on Esc / clicking outside. */
+let modalDone = null;
+function confirmDialog({ title, body, buttons }) {
+  if (modalDone) modalDone();
+  closeMenu();
+  return new Promise(resolve => {
+    $('#modalTitle').textContent = title;
+    $('#modalBody').textContent = body;
+    const actions = $('#modalActions'); actions.textContent = '';
+    const cancel = buttons.find(b => b.cancel);
+    const done = value => {
+      modalDone = null;
+      modal.classList.remove('open'); modal.setAttribute('aria-hidden', 'true');
+      resolve(value);
+    };
+    let focusEl = null;
+    for (const b of buttons) {
+      const el = document.createElement('button');
+      el.className = ['btn', b.kind, b.start && 'start'].filter(Boolean).join(' ');
+      el.textContent = b.label;
+      el.addEventListener('click', () => done(b.value));
+      actions.append(el);
+      if (b.focus) focusEl = el;
+    }
+    modalDone = () => done(cancel ? cancel.value : null);
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    modal.classList.add('open'); modal.setAttribute('aria-hidden', 'false');
+    (focusEl || actions.lastElementChild).focus();
+  });
+}
+modal.addEventListener('click', e => { if (e.target === modal && modalDone) modalDone(); });
+
+// Closing the window with unsaved work asks first.
+let closing = false;
+appWindow.onCloseRequested(async e => {
+  if (closing || !hasWork()) return;
+  e.preventDefault();
+  if (busy) return;
+  busy = true;
+  let ok = false;
+  try { ok = await guardUnsaved(); } finally { busy = false; }
+  if (ok) { closing = true; await appWindow.destroy(); }
+});
 
 /* ───────── actions & keys ───────── */
 document.addEventListener('click', e => {
@@ -861,6 +1099,22 @@ function toggleTheme() {
 document.addEventListener('keydown', e => {
   const mod = isMac ? e.metaKey : e.ctrlKey;
   const typing = e.target instanceof Element && e.target.closest('input, textarea, [contenteditable="true"]');
+  const k = (e.key || '').toLowerCase(); // autofill can send keydowns without a key
+  if (modal.classList.contains('open')) {
+    if (e.key === 'Escape') { e.preventDefault(); modalDone && modalDone(); }
+    else if (e.key === 'Tab') { // keep focus inside the dialog
+      const btns = [...modal.querySelectorAll('button')];
+      const i = btns.indexOf(document.activeElement);
+      e.preventDefault();
+      btns[(i + (e.shiftKey ? -1 : 1) + btns.length) % btns.length].focus();
+    }
+    return;
+  }
+  // A reload would throw away the open project.
+  if (e.key === 'F5' || (mod && k === 'r')) { e.preventDefault(); return; }
+  if (mod && k === 's') { e.preventDefault(); exclusive(() => saveProject({ as: e.shiftKey })); return; }
+  if (mod && k === 'o') { e.preventDefault(); exclusive(() => openProject()); return; }
+  if (mod && e.shiftKey && k === 'n') { e.preventDefault(); exclusive(newProject); return; }
   if (drag && drag.active && e.key === 'Escape') { e.preventDefault(); finishDrag(true); drag = null; return; }
   if (focus.classList.contains('open')) {
     if (e.key === 'Escape' || e.key === ' ') { e.preventDefault(); closeFocus(); }
@@ -891,15 +1145,16 @@ document.addEventListener('keydown', e => {
 (async function boot() {
   const theme = localStorage.getItem('trove.theme'); if (theme) document.documentElement.dataset.theme = theme;
   applyNarrow();
-  db = await openDB();
-  const [boards, items] = await Promise.all([dbAll('boards'), dbAll('items')]);
-  if (boards.length) {
-    state.boards = boards; state.items = items;
-    const saved = localStorage.getItem('trove.active');
-    state.active = boards.find(b => b.id === saved) ? saved : [...boards].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
-  } else await seed();
-  localStorage.setItem('trove.active', state.active);
-  renderSidebar(); renderHead(); measureHead(); renderGrid({ entrance: true, recount: true });
+  // Reopen the last project, or start a fresh one.
+  const last = recent()[0];
+  let opened = null, problem = null;
+  if (last) {
+    try { opened = await invoke('project_open', { path: last }); }
+    catch (e) { problem = errMsg(e); if (/no longer exists/.test(problem)) forget(last); }
+  }
+  loadProject(opened || await invoke('project_new'), opened ? last : null);
+  measureHead();
+  if (problem) toast(`Couldn’t reopen ${baseName(last)}. ${problem}`);
   if (document.fonts) document.fonts.ready.then(measureHead);
   setInterval(renderHead, 30000);
 })();
