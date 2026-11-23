@@ -892,8 +892,11 @@ function loadProject({ dir, manifest: m }, path) {
     .map(b => ({ id: String(b.id), name: String(b.name || 'Untitled board'), createdAt: +b.createdAt || now, updatedAt: +b.updatedAt || now }));
   if (!state.boards.length) state.boards.push({ id: uid(), name: 'Untitled board', createdAt: now, updatedAt: now });
   const ids = new Set(state.boards.map(b => b.id));
+  // Same naming rule the Rust side enforces when unpacking; links must be web addresses.
+  const usable = i => typeof i.file === 'string' ? /^[A-Za-z0-9_-]{1,64}\.[A-Za-z0-9]{1,5}$/.test(i.file)
+    : typeof i.src === 'string' && /^https?:\/\//i.test(i.src);
   state.items = (m && Array.isArray(m.items) ? m.items : [])
-    .filter(i => i && i.id && ids.has(i.boardId) && (i.file || i.src) && i.w > 0 && i.h > 0);
+    .filter(i => i && i.id && ids.has(i.boardId) && usable(i) && i.w > 0 && i.h > 0);
   state.active = m && ids.has(m.activeBoard) ? m.activeBoard : [...state.boards].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
   state.query = ''; searchEl.value = '';
   closeFocus(); closeMenu(); clearGrid();
