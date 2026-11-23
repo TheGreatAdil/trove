@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "trove",
+  "productName": "Trove",
   "version": "0.1.0",
   "identifier": "com.absideon.trove",
   "build": {
@@ -10,9 +10,13 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "trove",
-        "width": 800,
-        "height": 600
+        "title": "Trove",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 520,
+        "minHeight": 420,
+        "backgroundColor": "#ebeae5",
+        "dragDropEnabled": false
       }
     ],
     "security": {
