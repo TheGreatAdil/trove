@@ -1141,20 +1141,35 @@ document.addEventListener('keydown', e => {
   }
 });
 
+/* ───────── opening from the OS ───────── */
+// Double-clicking a .trv (or "Open with") while Trove is running arrives here.
+// Waits for boot and for any dialog or save in progress before switching.
+let booted = null;
+function openFromOs(path) {
+  booted.then(function attempt() {
+    if (busy) return setTimeout(attempt, 250);
+    exclusive(() => openProject(path));
+  });
+}
+
 /* ───────── boot ───────── */
-(async function boot() {
+booted = (async function boot() {
   const theme = localStorage.getItem('trove.theme'); if (theme) document.documentElement.dataset.theme = theme;
   applyNarrow();
-  // Reopen the last project, or start a fresh one.
-  const last = recent()[0];
+  // Listen before asking for the launch file, so nothing slips between the two.
+  await window.__TAURI__.event.listen('open-project', e => openFromOs(e.payload));
+  // Open the file Trove was launched with, else reopen the last project, else start fresh.
+  const launch = await invoke('take_launch_path');
+  const first = launch || recent()[0];
   let opened = null, problem = null;
-  if (last) {
-    try { opened = await invoke('project_open', { path: last }); }
-    catch (e) { problem = errMsg(e); if (/no longer exists/.test(problem)) forget(last); }
+  if (first) {
+    try { opened = await invoke('project_open', { path: first }); }
+    catch (e) { problem = errMsg(e); if (/no longer exists/.test(problem)) forget(first); }
   }
-  loadProject(opened || await invoke('project_new'), opened ? last : null);
+  loadProject(opened || await invoke('project_new'), opened ? first : null);
+  if (opened) remember(first);
   measureHead();
-  if (problem) toast(`Couldn’t reopen ${baseName(last)}. ${problem}`);
+  if (problem) toast(`Couldn’t ${launch ? 'open' : 'reopen'} ${baseName(first)}. ${problem}`);
   if (document.fonts) document.fonts.ready.then(measureHead);
   setInterval(renderHead, 30000);
 })();

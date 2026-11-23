@@ -30,6 +30,20 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "fileAssociations": [
+      {
+        "ext": ["trv"],
+        "name": "Trove Project",
+        "description": "Trove project",
+        "role": "Editor",
+        "rank": "Owner",
+        "mimeType": "application/x-trove-project",
+        "exportedType": {
+          "identifier": "com.absideon.trove.project",
+          "conformsTo": ["public.data"]
+        }
+      }
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
