@@ -198,7 +198,7 @@ While a board is open, its images sit unpacked in a working folder under the app
   | Muted text | `#67655f` | `#9b998f` |
   | Accent | `#ff4d1a` | `#ff5a2a` |
 
-- **Layout:** a 256px sidebar sits directly on the window surface. The board sits in a single rounded panel (16px radius, 8px inset from the window edge). Cards have a 14px radius, a 14px gap and 36px of side padding.
+- **Layout:** a 256px sidebar sits directly on the window surface. The board sits in a single rounded panel, 8px in from the window edge. Its corners follow the window's own: where the OS rounds them, the panel's radius is the window's minus that 8px, so the gap stays even round the corner, but never less than 8px. That gives 8px on Windows 11 (8px windows) and on macOS 27 (reportedly 16pt windows, not yet checked on a Mac). Where windows have square corners (Windows 10, most Linux desktops) it stays at 16px. Each OS's window radius is in `windowRadius()` in `main.js`; Rust reports the OS and its version (`platform.rs`). Cards have a 14px radius, a 14px gap and 36px of side padding.
 - **Quiet chrome:** cards slide under the header into a gradual blur (ten stacked backdrop blurs growing from a fifth of a pixel to 24px towards the top edge, with a tint of the panel colour). It starts faint enough that there is no visible line where it begins. A thin custom scroll indicator replaces the native scrollbar.
 - **Motion:** eased with `cubic-bezier(.16, 1, .3, 1)`. The sidebar animates over 0.5s, and the cards resize in the same motion. Animations switch off when the system asks for reduced motion.
 

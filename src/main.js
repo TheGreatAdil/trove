@@ -1474,9 +1474,28 @@ function openFromOs(path) {
   });
 }
 
+/* ───────── window corners ───────── */
+// The radius the OS gives the window's corners, in px; 0 where they're square.
+// The panel's corners follow it (styles.css, .round-window).
+function windowRadius({ name, version } = {}) {
+  if (name === 'windows') return version >= 11 ? 8 : 0; // Windows 10 windows are square
+  if (name === 'macos') {
+    if (version >= 27) return 16; // one radius for every window, reportedly 16pt; check on a Mac
+    if (version >= 26) return 16; // title-bar-only windows like Trove's; unverified
+    return 10;                    // macOS 11–15
+  }
+  return 0; // Linux: up to the desktop, and usually square at the bottom
+}
+function applyWindowCorners() {
+  const r = windowRadius(window.__TROVE_OS__);
+  document.documentElement.classList.toggle('round-window', r > 0);
+  document.documentElement.style.setProperty('--r-window', `${r}px`);
+}
+
 /* ───────── boot ───────── */
 booted = (async function boot() {
   const theme = localStorage.getItem('trove.theme'); if (theme) document.documentElement.dataset.theme = theme;
+  applyWindowCorners();
   applyNarrow();
   // Listen before asking for the launch file, so nothing slips between the two.
   await window.__TAURI__.event.listen('open-project', e => openFromOs(e.payload));

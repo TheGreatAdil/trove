@@ -42,12 +42,18 @@
   --ease-out: cubic-bezier(.16, 1, .3, 1);
   --side-w: 256px;
   --inset: 8px;
+  --r-window: 0px; /* the OS's own window corner, set at launch (main.js) */
   --r-panel: 16px;
   --pad: 36px;
   --gap: 14px;
   --r-card: 14px;
   --t-side: .5s;
 }
+/* Where the OS rounds the window's corners, the panel's corners follow them, so
+   the gap between panel and window stays even all the way round: the window's
+   radius minus the gap. Never below 8px, which is what Windows 11 itself uses;
+   the strict figure there (8 - 8) would be a square corner. */
+.round-window { --r-panel: max(var(--r-window) - var(--inset), 8px); }
 [data-theme="light"] {
   --win: #ebeae5;
   --bg: #fbfaf8;
@@ -733,7 +739,7 @@ body.dragging .card:hover img.loaded { transform: none; filter: none; }
 /* ───────── Small windows ───────── */
 .scrim { position: fixed; inset: 0; z-index: 4; background: rgba(0, 0, 0, .2); opacity: 0; pointer-events: none; transition: opacity .3s; }
 .app.narrow .stage { left: var(--inset); }
-.app.narrow .sidebar { background: var(--win); box-shadow: var(--shadow); border-radius: 0 16px 16px 0; }
+.app.narrow .sidebar { background: var(--win); box-shadow: var(--shadow); border-radius: 0 var(--r-panel) var(--r-panel) 0; }
 .app.narrow.collapsed .sidebar { box-shadow: none; }
 .app.narrow:not(.collapsed) .scrim { opacity: 1; pointer-events: auto; }
 @media (max-width: 720px) {

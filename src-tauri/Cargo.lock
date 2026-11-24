@@ -4389,6 +4389,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tiny_http",
  "trash",
+ "windows-version",
  "zip",
 ]
 

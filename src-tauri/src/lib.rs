@@ -1,4 +1,5 @@
 mod mcp;
+mod platform;
 mod project;
 
 use std::path::{Path, PathBuf};
@@ -305,6 +306,8 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_dialog::init())
+        // Tells the page which OS it is on before its scripts run (platform.rs).
+        .plugin(tauri::plugin::Builder::<_, ()>::new("platform").js_init_script(platform::init_script()).build())
         .manage(Mutex::new(Session::default()))
         .manage(Mutex::new(Launch { ready: false, pending: launch_path }))
         .setup(|app| {
