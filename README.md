@@ -41,7 +41,7 @@ Recommended editor setup: [VS Code](https://code.visualstudio.com/) with the [Ta
 **Boards are files**
 - Every board is its own project: one `.trv` file holding the board's images and notes. One board is open at a time.
 - New board (`Ctrl N`) starts an unsaved board with its title ready to type. Save (`Ctrl S`) asks where to put it the first time, suggesting the board's name.
-- Renaming a saved board renames its file.
+- A board's name is stored inside its file, so the file can be called anything: `references.trv` can hold a board called Portfolio Site. Renaming a board (click its title) is an edit you save like any other, and never touches the file name. An unnamed board takes the file name you choose when you first save it. The board menu shows which file a board lives in.
 - The board menu (the `···` button in the header) has Rename, Save, Save as and Delete board. Delete moves the `.trv` file to the Recycle Bin (Trash on macOS and Linux) after a second click, so it can be restored. An unsaved board is discarded instead.
 - Double-click a `.trv` file to open it in Trove. If Trove is already running, the open window switches to that board.
 - Before switching boards or closing the window throws away unsaved work, Trove asks whether to save. Unsaved changes show as a dot on the board's row and next to its title, and as a `*` in the window title.
@@ -126,12 +126,13 @@ project.json        the board's cards and their metadata
 images/<id>.<ext>   every image on the board, in its original format
 ```
 
-The board's name is the file's name. `project.json` looks like this:
+`project.json` looks like this:
 
 ```json
 {
   "format": "trove",
   "version": 2,
+  "name": "Portfolio Site",
   "createdAt": 1795990000000,
   "updatedAt": 1795996000000,
   "savedAt": 1795996800000,
@@ -144,6 +145,7 @@ The board's name is the file's name. `project.json` looks like this:
 }
 ```
 
+- `name` is the board's name, independent of the file name. Files without one are named after the file.
 - `file` names an image inside `images/`. Images kept as web links have `src` (their address) instead.
 - Notes have `"kind": "text"` and their words in `text`.
 - `color` is an image's average colour (the placeholder while it loads). `tone` is its dominant colour, used for the board palette.

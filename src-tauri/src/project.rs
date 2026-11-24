@@ -171,32 +171,6 @@ pub fn extract(src: &Path, session: &Path) -> Result<Value, String> {
     Ok(manifest)
 }
 
-/// Turns a board name into a safe file name (without the extension).
-pub fn file_stem_for(name: &str) -> Result<String, String> {
-    let cleaned: String = name
-        .chars()
-        .map(|c| if c.is_control() || "<>:\"/\\|?*".contains(c) { ' ' } else { c })
-        .collect();
-    let mut stem = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    stem = stem.trim_end_matches(['.', ' ']).to_string();
-    if stem.chars().count() > 120 {
-        stem = stem.chars().take(120).collect::<String>().trim_end().to_string();
-    }
-    if stem.is_empty() {
-        return Err("A board needs a name.".into());
-    }
-    // Windows reserves these names in every folder.
-    let upper = stem.to_ascii_uppercase();
-    let reserved = ["CON", "PRN", "AUX", "NUL"].contains(&upper.as_str())
-        || ((upper.starts_with("COM") || upper.starts_with("LPT"))
-            && upper.len() == 4
-            && upper.as_bytes()[3].is_ascii_digit());
-    if reserved {
-        stem.push_str(" board");
-    }
-    Ok(stem)
-}
-
 fn read_manifest_from<R: Read + io::Seek>(zip: &mut ZipArchive<R>) -> Result<Value, String> {
     let damaged = |e: &dyn std::fmt::Display| format!("This project file is damaged: {e}");
     let mut entry = zip.by_name(MANIFEST).map_err(|_| damaged(&"project.json is missing"))?;
@@ -262,12 +236,20 @@ pub fn update(path: &Path, add_from: &Path, edit: impl FnOnce(&mut Value)) -> Re
 #[serde(rename_all = "camelCase")]
 pub struct Info {
     pub path: String,
+    /// The board's name from project.json; the sidebar falls back to the file name.
+    pub name: Option<String>,
     pub count: usize,
     pub updated_at: f64,
     /// An image from the board, unpacked into the thumbnail cache.
     pub thumb: Option<String>,
     pub color: Option<String>,
     pub error: Option<String>,
+}
+
+/// The name a board carries inside its file, if it has one.
+pub fn board_name(manifest: &Value) -> Option<String> {
+    let name = manifest.get("name")?.as_str()?.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!name.is_empty()).then(|| name.chars().take(200).collect())
 }
 
 fn sort_key(item: &Value) -> f64 {
@@ -284,6 +266,7 @@ pub fn info(path: &Path, thumbs: &Path) -> Info {
     let result = (|| -> Result<(), String> {
         let mut zip = open_zip(path)?;
         let manifest = read_manifest_from(&mut zip)?;
+        out.name = board_name(&manifest);
         let items = manifest.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
         out.count = items.len();
         out.updated_at = ["updatedAt", "savedAt"]
@@ -409,18 +392,6 @@ mod tests {
     }
 
     #[test]
-    fn board_names_become_safe_file_names() {
-        assert_eq!(file_stem_for("  Slow   light ").unwrap(), "Slow light");
-        assert_eq!(file_stem_for("a/b:c*d?").unwrap(), "a b c d");
-        assert_eq!(file_stem_for("Draft...").unwrap(), "Draft");
-        assert_eq!(file_stem_for("con").unwrap(), "con board");
-        assert_eq!(file_stem_for("COM3").unwrap(), "COM3 board");
-        assert_eq!(file_stem_for("Comics").unwrap(), "Comics");
-        assert!(file_stem_for(" / ").is_err());
-        assert_eq!(file_stem_for(&"x".repeat(300)).unwrap().len(), 120);
-    }
-
-    #[test]
     fn update_moves_items_between_saved_boards() {
         let root = temp_dir("update");
         let session = root.join("open");
@@ -428,7 +399,7 @@ mod tests {
         fs::write(images_dir(&session).join("a.png"), b"aaa").unwrap();
         fs::write(images_dir(&session).join("b.jpg"), b"bbb").unwrap();
         let board = root.join("Other.trv");
-        let manifest = json!({ "format": "trove", "version": 2, "items": [
+        let manifest = json!({ "format": "trove", "version": 2, "name": "  Portfolio   site ", "items": [
             { "id": "a", "file": "a.png", "pos": 1, "color": "rgb(1, 2, 3)" }
         ]});
         write(&board, &manifest, &session).unwrap();
@@ -463,6 +434,10 @@ mod tests {
         assert_eq!(summary.count, 2);
         assert_eq!(fs::read(summary.thumb.unwrap()).unwrap(), b"aaa");
         assert_eq!(summary.color.as_deref(), Some("rgb(1, 2, 3)"));
+        // The board's own name survives edits and is independent of the file name.
+        assert_eq!(summary.name.as_deref(), Some("Portfolio site"));
+        assert_eq!(board_name(&json!({ "name": "   " })), None);
+        assert_eq!(board_name(&json!({})), None);
         assert!(info(&root.join("nope.trv"), &thumbs).error.unwrap().contains("no longer exists"));
 
         fs::remove_dir_all(&root).unwrap();

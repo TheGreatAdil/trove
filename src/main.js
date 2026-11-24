@@ -49,7 +49,8 @@ const state = {
 /* The open board. Every board is its own .trv project file (`path` is null
    until it's saved). Its images live unpacked in `dir`, a session folder the
    Rust side manages, until the board is saved back into its file. */
-const project = { path: null, name: 'Untitled board', createdAt: 0, updatedAt: 0, dir: '', sep: '/', dirty: false, rev: 0 };
+const UNTITLED = 'Untitled board';
+const project = { path: null, name: UNTITLED, createdAt: 0, updatedAt: 0, dir: '', sep: '/', dirty: false, rev: 0 };
 
 /* The library: every saved board Trove knows about, listed in the sidebar.
    Paths are kept most recently opened first. `libInfo` holds what
@@ -88,7 +89,7 @@ const sbar = $('#sbar'), sthumb = $('#sthumb');
 function sidebarRows() {
   const rows = library.filter(p => !samePath(p, project.path)).map(p => {
     const i = libInfo.get(p) || {};
-    return { path: p, name: baseName(p), count: i.count || 0, updatedAt: i.updatedAt || 0,
+    return { path: p, name: i.name || baseName(p), count: i.count || 0, updatedAt: i.updatedAt || 0,
       thumb: i.thumb ? convertFileSrc(i.thumb) : null, color: i.color || null };
   });
   const cover = boardItems().find(i => i.file || i.src);
@@ -194,34 +195,22 @@ titleEl.addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); }
   if (e.key === 'Escape') { titleEl.textContent = activeBoard().name; titleEl.blur(); }
 });
-// Renames run one after another, and every board operation waits for them first
-// (see settleTitle): a save that started mid-rename used to write the board back
-// under its old name, leaving two files and two rows.
-let renaming = Promise.resolve();
 titleEl.addEventListener('blur', () => {
   const v = titleEl.textContent.replace(/\s+/g, ' ').trim();
-  if (v && v !== project.name) renaming = renaming.then(() => renameBoard(v));
+  if (v && v !== project.name) renameBoard(v);
   titleEl.textContent = project.name; renderHead();
   titleEl.scrollLeft = 0;
 });
-// A saved board's name is its file name, so renaming renames the file.
-async function renameBoard(name) {
-  if (!project.path) { project.name = name; renderHead(); renderSidebar(); return; }
-  if (name === project.name) return;
-  const from = project.path;
-  try {
-    const to = await invoke('project_rename', { path: from, name });
-    // The file has moved even if another board is open by now, so the library follows it.
-    library = library.map(p => samePath(p, from) ? to : p); saveLibrary();
-    for (const [k, info] of libInfo) if (samePath(k, from)) { libInfo.delete(k); libInfo.set(to, { ...info, path: to }); }
-    if (samePath(from, project.path)) { project.path = to; project.name = baseName(to); }
-  } catch (e) { toast(errMsg(e)); }
+// The board's name is stored inside its file, independent of the file's own name:
+// renaming is an edit like any other, written by the next save.
+function renameBoard(name) {
+  project.name = name; touch();
   renderHead(); renderSidebar();
 }
-// Lands a title edit (and its file rename) before anything reads or replaces the open board.
-async function settleTitle() {
+// Lands a title edit before anything reads or replaces the open board, so a save
+// started mid-edit writes the new name.
+function settleTitle() {
   if (document.activeElement === titleEl) titleEl.blur();
-  await renaming;
 }
 function focusTitle() {
   requestAnimationFrame(() => {
@@ -640,7 +629,7 @@ function retarget() {
     d.link = target;
     if (target) target.classList.add('drop-target');
     d.ghost.classList.toggle('over-board', !!target);
-    if (target) dockHint(`Move to ${baseName(target.dataset.path)}`);
+    if (target) dockHint(`Move to ${boardNameOf(target.dataset.path)}`);
     else dockHint(app.classList.contains('collapsed') ? 'Drag to reorder' : 'Drag to reorder, or drop on a board');
   }
   if (target) return;
@@ -705,7 +694,7 @@ function commitOrder(order) {
 // It leaves this board as an unsaved change; its image stays in the session
 // folder, so undo can put it back.
 async function moveItem(it, path) {
-  const session = project.dir, name = baseName(path);
+  const session = project.dir, name = boardNameOf(path);
   const putBack = () => {
     state.items.push(it); touch();
     renderGrid({ fresh: new Set([it.id]), animate: true }); renderHead(); renderSidebar();
@@ -965,7 +954,7 @@ async function newBoard() {
 // the open board then opens the most recently used one (or a new board).
 async function deleteBoard(path) {
   const isOpen = !path || samePath(path, project.path);
-  const name = path ? baseName(path) : project.name;
+  const name = isOpen ? project.name : boardNameOf(path);
   if (path) { await invoke('project_delete', { path }); forgetBoard(path); }
   if (isOpen) {
     let opened = null, next = null;
@@ -999,7 +988,10 @@ function openBoardMenu(target, anchor, alignRight = false) {
   if (target.link) target.link.classList.add('menu-open');
   const item = (m, icon, label, kbd = '') =>
     `<button data-m="${m}">${icon}<span class="grow">${label}</span>${kbd ? `<span class="kbd">${kbd}</span>` : ''}</button>`;
+  // The board's name and its file name are independent, so the menu says which file it is.
+  const where = target.path ? `<div class="menu-label" title="${esc(target.path)}">${esc(fileName(target.path))}</div>` : '<div class="menu-label">Not saved yet</div>';
   menu.innerHTML = [
+    where,
     ...(target.current
       ? [item('rename', ICON.rename, 'Rename'), item('save', ICON.save, 'Save', `${MOD} S`), item('save-as', ICON.saveAs, 'Save as…', `${MOD} Shift S`)]
       : [item('open', ICON.open, 'Open'), item('hide', ICON.hide, 'Remove from sidebar')]),
@@ -1036,7 +1028,7 @@ menu.addEventListener('click', e => {
   else if (m === 'save') exclusive(() => saveProject());
   else if (m === 'save-as') exclusive(() => saveProject({ as: true }));
   else if (m === 'open') exclusive(() => openProject(t.path));
-  else if (m === 'hide') { forgetBoard(t.path); renderSidebar(); toast(`Removed ${baseName(t.path)} from the sidebar. The file is untouched.`); }
+  else if (m === 'hide') { const name = boardNameOf(t.path); forgetBoard(t.path); renderSidebar(); toast(`Removed ${name} from the sidebar. The file is untouched.`); }
 });
 $('#boardMenuBtn').addEventListener('click', e => {
   e.stopPropagation();
@@ -1099,6 +1091,8 @@ const modal = $('#modal');
 const FILTERS = [{ name: 'Trove board', extensions: ['trv'] }];
 const fileName = p => p.split(/[\\/]/).pop();
 const baseName = p => fileName(p).replace(/\.trv$/i, '');
+// A saved board's own name (stored in its file), else its file name.
+const boardNameOf = p => { for (const [k, i] of libInfo) if (samePath(k, p) && i.name) return i.name; return baseName(p); };
 const samePath = (a, b) => !!a && !!b && (isWin ? a.toLowerCase() === b.toLowerCase() : a === b);
 const hasWork = () => project.dirty && (project.path || state.items.length > 0);
 const safeFileName = name => name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '') || 'Untitled board';
@@ -1142,9 +1136,9 @@ function touch() { project.rev++; project.dirty = true; project.updatedAt = Date
 
 const manifestItem = ({ id, kind, text, file, src, w, h, color, tone, createdAt, pos, source }) =>
   ({ id, kind, text, file, src, w, h, color, tone, createdAt, pos, source });
-function manifest() {
+function manifest(name = project.name) {
   return {
-    format: 'trove', version: 2,
+    format: 'trove', version: 2, name,
     createdAt: project.createdAt, updatedAt: project.updatedAt, savedAt: Date.now(),
     items: state.items.map(manifestItem),
   };
@@ -1156,7 +1150,8 @@ function loadProject({ dir, manifest: m }, path) {
   const previous = project.path, now = Date.now();
   Object.assign(project, {
     path, dir, sep: dir.includes('\\') ? '\\' : '/', dirty: false, rev: 0,
-    name: path ? baseName(path) : 'Untitled board',
+    // The name stored in the file wins; older files without one are named after the file.
+    name: (m && typeof m.name === 'string' && m.name.replace(/\s+/g, ' ').trim().slice(0, 200)) || (path ? baseName(path) : UNTITLED),
     createdAt: +(m && m.createdAt) || now,
     updatedAt: +(m && (m.updatedAt || m.savedAt)) || now,
   });
@@ -1181,7 +1176,7 @@ let busy = false;
 async function exclusive(fn) {
   if (busy) return;
   busy = true;
-  try { await settleTitle(); await fn(); }
+  try { settleTitle(); await fn(); }
   catch (e) { console.error(e); toast(errMsg(e)); }
   finally { busy = false; }
 }
@@ -1224,16 +1219,18 @@ async function openProject(path) {
 
 // Resolves true once the board is safely on disk.
 async function saveProject({ as = false } = {}) {
-  await settleTitle(); // a rename in progress lands first, so the save writes the new file
+  settleTitle(); // a name being typed is part of what gets saved
   let path = project.path;
   if (as || !path) {
     path = await dialog.save({ title: 'Save board', filters: FILTERS, defaultPath: project.path || `${safeFileName(project.name)}.trv` });
     if (!path) return false;
   }
+  // A board nobody has named takes the name you give its file; a named board keeps its own.
+  const name = !project.path && project.name === UNTITLED ? baseName(path) : project.name;
   const rev = project.rev;
   try {
-    const res = await invoke('project_save', { path, manifest: manifest() });
-    project.path = res.path; project.name = baseName(res.path);
+    const res = await invoke('project_save', { path, manifest: manifest(name) });
+    project.path = res.path; project.name = name;
     project.dirty = project.rev !== rev; // edits made while saving still count
     rememberBoard(res.path);
     renderHead(); renderSidebar();
@@ -1286,7 +1283,7 @@ appWindow.onCloseRequested(async e => {
   if (busy) return;
   busy = true;
   let ok = false;
-  try { await settleTitle(); ok = await guardUnsaved(); } finally { busy = false; }
+  try { settleTitle(); ok = await guardUnsaved(); } finally { busy = false; }
   if (ok) { closing = true; await appWindow.destroy(); }
 });
 
@@ -1428,7 +1425,7 @@ booted = (async function boot() {
   if (opened) rememberBoard(first);
   measureHead();
   refreshLibrary(); // fills in the other boards' rows
-  if (problem) toast(`Couldn’t ${launch ? 'open' : 'reopen'} ${baseName(first)}. ${problem}`);
+  if (problem) toast(`Couldn’t ${launch ? 'open' : 'reopen'} ${fileName(first)}. ${problem}`);
   sizeComposer();
   // Notes are measured off-screen, so wait for Geist too (it loads only once a note needs it).
   if (document.fonts) Promise.all([document.fonts.ready, document.fonts.load('16px Geist').catch(() => {})])

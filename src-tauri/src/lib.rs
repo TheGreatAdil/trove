@@ -138,23 +138,6 @@ async fn library_info(app: AppHandle, paths: Vec<String>) -> CmdResult<Vec<proje
         .collect())
 }
 
-/// Renames a board's file to match its new name. Returns the new path.
-#[tauri::command]
-async fn project_rename(path: String, name: String) -> CmdResult<String> {
-    let from = trv_path(&path)?;
-    let stem = project::file_stem_for(&name)?;
-    let to = from.with_file_name(format!("{stem}.{}", project::EXTENSION));
-    if to == from {
-        return Ok(path);
-    }
-    let only_case_changed = to.to_string_lossy().to_lowercase() == from.to_string_lossy().to_lowercase();
-    if to.exists() && !only_case_changed {
-        return Err(format!("There's already a board called “{stem}” in that folder."));
-    }
-    std::fs::rename(&from, &to).map_err(|e| format!("Couldn't rename the board: {e}"))?;
-    Ok(to.display().to_string())
-}
-
 /// Adds items from the open board to another, saved board (drag onto a board
 /// in the sidebar). Their images are copied from the open board's folder.
 #[tauri::command]
@@ -283,7 +266,6 @@ pub fn run() {
             project_open,
             project_save,
             project_delete,
-            project_rename,
             project_add_items,
             project_remove_items,
             library_info,
