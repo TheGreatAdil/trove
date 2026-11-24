@@ -153,7 +153,7 @@ svg { display: block; flex: none; }
   transition: transform .3s var(--ease-out);
 }
 .new-board:hover .plus { transform: rotate(90deg); }
-.search .glass { width: 22px; display: grid; place-items: center; color: var(--ink-2); }
+.search .glass, .open-board .glass { width: 22px; display: grid; place-items: center; color: var(--ink-2); }
 .search input { border: 0; outline: 0; background: none; padding: 0; height: 100%; }
 .search input::placeholder { color: var(--ink-2); }
 
@@ -196,23 +196,16 @@ body.dragging .board-link .more { opacity: 0 !important; }
 @keyframes received { 0% { box-shadow: 0 0 0 1.5px var(--ink); } 100% { box-shadow: 0 0 0 1.5px transparent; } }
 .no-results { color: var(--ink-3); padding: 14px 8px; }
 
-/* Project switcher: name + status, opens the project menu */
-.side-foot { padding: 8px 10px 12px; display: flex; align-items: center; gap: 4px; }
-.project-btn {
-  flex: 1; min-width: 0;
-  display: grid; gap: 2px;
-  padding: 7px 8px; border-radius: 10px;
-  text-align: left;
-  transition: background .15s;
-}
-.project-btn:hover, .project-btn.menu-open { background: var(--hover); }
-.project-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 560; }
-.project-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-name svg { color: var(--ink-3); }
-.project-status { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink-3); line-height: 1.35; }
-.project-status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-status .dot { display: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
-.side-foot.dirty .project-status .dot { display: block; }
+.side-foot { padding: 10px 10px 14px 18px; display: flex; align-items: center; justify-content: space-between; }
+.lib-stat { font-size: 12px; color: var(--ink-3); line-height: 1.35; }
+.lib-stat b { color: var(--ink-2); font-weight: 520; }
+
+/* Unsaved changes: a dot on the open board's row, and a note in the header */
+.board-link .count.unsaved { width: 6px; height: 6px; padding: 0; margin-right: 8px; border-radius: 50%; background: var(--accent); }
+.board-link:hover .count.unsaved { opacity: 0; }
+.meta .unsaved { display: none; align-items: center; gap: 7px; color: var(--ink-2); }
+.meta .unsaved::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.app.dirty .meta .unsaved { display: inline-flex; }
 
 /* ───────── The panel: one rounded cutout holding the board ───────── */
 .stage {

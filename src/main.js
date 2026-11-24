@@ -34,21 +34,28 @@ function groupOf(t) {
   const s = start.getTime();
   if (t >= s) return 'Today';
   if (t >= s - DAY) return 'Yesterday';
-  if (t >= s - 7 * DAY) return 'Previous 7 days';
-  if (t >= s - 30 * DAY) return 'Previous 30 days';
+  if (t >= s - 7 * DAY) return 'This week';
+  if (t >= s - 30 * DAY) return 'This month';
   return 'Earlier';
 }
 
 /* ───────── state ───────── */
 const state = {
-  boards: [], items: [], active: null,
+  items: [],
   colTarget: +(localStorage.getItem('trove.col') || 210),
   query: '', hovered: null,
 };
 
-/* The open project. Its images live unpacked in `dir` (a session folder the
-   Rust side manages) until the project is saved back into its .trv file. */
-const project = { path: null, dir: '', sep: '/', dirty: false, rev: 0 };
+/* The open board. Every board is its own .trv project file (`path` is null
+   until it's saved). Its images live unpacked in `dir`, a session folder the
+   Rust side manages, until the board is saved back into its file. */
+const project = { path: null, name: 'Untitled board', createdAt: 0, updatedAt: 0, dir: '', sep: '/', dirty: false, rev: 0 };
+
+/* The library: every saved board Trove knows about, listed in the sidebar.
+   Paths are kept most recently opened first. `libInfo` holds what
+   library_info read from each file: count, last update, cover thumbnail. */
+let library = [];
+const libInfo = new Map();
 
 // Images stored in the project are shown straight from disk via the asset
 // protocol. Links that couldn't be downloaded keep their web address in `src`.
@@ -61,8 +68,8 @@ function srcOf(it) {
 const thumbOf = srcOf;
 const sortKey = it => it.pos ?? it.createdAt; // manual order wins once a card has been dragged
 const byId = id => state.items.find(i => i.id === id);
-const boardItems = (id = state.active) => state.items.filter(i => i.boardId === id).sort((a, b) => sortKey(b) - sortKey(a));
-const activeBoard = () => state.boards.find(b => b.id === state.active);
+const boardItems = () => [...state.items].sort((a, b) => sortKey(b) - sortKey(a));
+const activeBoard = () => project;
 
 /* ───────── elements ───────── */
 const app = $('#app'), stage = $('#stage'), grid = $('#grid'), scroll = $('#scroll'), listEl = $('#boardList');
@@ -74,55 +81,73 @@ const drop = $('#drop'), menu = $('#menu'), focus = $('#focus'), focusImg = $('#
 const densityEl = $('#density'), searchEl = $('#search'), filePick = $('#filePick');
 const sbar = $('#sbar'), sthumb = $('#sthumb');
 
-/* ───────── sidebar ───────── */
+/* ───────── sidebar: the board library ───────── */
+// One row per saved board, plus the open board with live data (even unsaved).
+function sidebarRows() {
+  const rows = library.filter(p => !samePath(p, project.path)).map(p => {
+    const i = libInfo.get(p) || {};
+    return { path: p, name: baseName(p), count: i.count || 0, updatedAt: i.updatedAt || 0,
+      thumb: i.thumb ? convertFileSrc(i.thumb) : null, color: i.color || null };
+  });
+  const cover = boardItems().find(i => i.file || i.src);
+  rows.push({ path: project.path, current: true, name: project.name, count: state.items.length,
+    updatedAt: project.updatedAt, thumb: cover ? thumbOf(cover) : null, color: cover ? cover.color : null });
+  return rows;
+}
 function renderSidebar() {
+  const all = sidebarRows();
   const q = state.query.trim().toLowerCase();
-  const boards = [...state.boards]
-    .filter(b => !q || b.name.toLowerCase().includes(q))
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const rows = all.filter(r => !q || r.name.toLowerCase().includes(q)).sort((a, b) => b.updatedAt - a.updatedAt);
   listEl.textContent = '';
-  if (!boards.length) {
+  if (!rows.length) {
     const d = document.createElement('div'); d.className = 'no-results';
     d.textContent = `No boards match “${state.query.trim()}”`;
     listEl.append(d);
   }
   let last = '';
-  for (const b of boards) {
-    const g = groupOf(b.updatedAt);
+  for (const r of rows) {
+    const g = groupOf(r.updatedAt);
     if (g !== last) {
       const l = document.createElement('div'); l.className = 'group-label'; l.textContent = g;
       listEl.append(l); last = g;
     }
-    const items = boardItems(b.id);
     const a = document.createElement('div');
-    a.className = 'board-link' + (b.id === state.active ? ' active' : '');
-    a.dataset.id = b.id; a.tabIndex = 0;
+    a.className = 'board-link' + (r.current ? ' active' : '');
+    if (r.path) a.dataset.path = r.path;
+    if (r.current) a.dataset.current = '1';
+    a.tabIndex = 0; a.title = r.path || 'Not saved yet';
     const th = document.createElement('span'); th.className = 'thumb';
-    if (items[0]) th.style.backgroundImage = `url("${thumbOf(items[0])}")`;
-    const nm = document.createElement('span'); nm.className = 'name'; nm.textContent = b.name;
-    const ct = document.createElement('span'); ct.className = 'count'; ct.textContent = items.length || '';
+    if (r.thumb) th.style.backgroundImage = `url("${r.thumb}")`;
+    else if (r.color) th.style.backgroundColor = r.color;
+    const nm = document.createElement('span'); nm.className = 'name'; nm.textContent = r.name;
+    const ct = document.createElement('span'); ct.className = 'count';
+    if (r.current && project.dirty) { ct.classList.add('unsaved'); ct.title = 'Unsaved changes'; }
+    else ct.textContent = r.count || '';
     const mo = document.createElement('button'); mo.className = 'more'; mo.setAttribute('aria-label', 'Board options');
     mo.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="3.5" cy="8" r="1.15"/><circle cx="8" cy="8" r="1.15"/><circle cx="12.5" cy="8" r="1.15"/></svg>';
     a.append(th, nm, ct, mo);
     listEl.append(a);
   }
+  $('#libStat').innerHTML = `<b>${plural(all.length, 'board')}</b><br>Each saved as a .trv file`;
   renderProject();
 }
 
+const linkTarget = link => ({ path: link.dataset.path || null, current: !!link.dataset.current, link });
+function activateLink(link) { if (!link.dataset.current) exclusive(() => openProject(link.dataset.path)); }
 listEl.addEventListener('click', e => {
   const link = e.target.closest('.board-link'); if (!link) return;
-  if (e.target.closest('.more')) { e.stopPropagation(); openBoardMenu(link.dataset.id, e.target.closest('.more'), link); return; }
-  selectBoard(link.dataset.id);
+  if (e.target.closest('.more')) { e.stopPropagation(); openBoardMenu(linkTarget(link), e.target.closest('.more')); return; }
+  activateLink(link);
 });
 listEl.addEventListener('keydown', e => {
   const link = e.target.closest('.board-link');
-  if (link && e.key === 'Enter') selectBoard(link.dataset.id);
+  if (link && e.key === 'Enter') activateLink(link);
 });
 
 searchEl.addEventListener('input', () => { state.query = searchEl.value; renderSidebar(); });
 searchEl.addEventListener('keydown', e => {
   if (e.key === 'Escape') { searchEl.value = ''; state.query = ''; renderSidebar(); searchEl.blur(); }
-  if (e.key === 'Enter') { const f = listEl.querySelector('.board-link'); if (f) { selectBoard(f.dataset.id); searchEl.blur(); } }
+  if (e.key === 'Enter') { const f = listEl.querySelector('.board-link'); if (f) { activateLink(f); searchEl.blur(); } }
 });
 
 /* ───────── palette ───────── */
@@ -169,12 +194,30 @@ titleEl.addEventListener('keydown', e => {
   if (e.key === 'Escape') { titleEl.textContent = activeBoard().name; titleEl.blur(); }
 });
 titleEl.addEventListener('blur', () => {
-  const b = activeBoard(); if (!b) return;
   const v = titleEl.textContent.replace(/\s+/g, ' ').trim();
-  if (v && v !== b.name) { b.name = v; touch(); renderSidebar(); }
-  titleEl.textContent = b.name; renderHead();
+  if (v && v !== project.name) renameBoard(v);
+  titleEl.textContent = project.name; renderHead();
   titleEl.scrollLeft = 0;
 });
+// A saved board's name is its file name, so renaming renames the file.
+async function renameBoard(name) {
+  if (!project.path) { project.name = name; renderHead(); renderSidebar(); return; }
+  const from = project.path;
+  try {
+    const to = await invoke('project_rename', { path: from, name });
+    if (!samePath(from, project.path)) return; // switched boards meanwhile
+    project.path = to; project.name = baseName(to);
+    library = library.map(p => samePath(p, from) ? to : p); saveLibrary();
+  } catch (e) { toast(errMsg(e)); }
+  renderHead(); renderSidebar();
+}
+function focusTitle() {
+  requestAnimationFrame(() => {
+    titleEl.focus();
+    const r = document.createRange(); r.selectNodeContents(titleEl);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+  });
+}
 
 /* Header collapses as you scroll: the big title shrinks into a compact one while
    images slide underneath a progressive blur. Nothing in the grid moves. */
@@ -411,13 +454,13 @@ function retarget() {
   const d = drag;
   const el = document.elementFromPoint(d.x, d.y);
   const link = el && el.closest ? el.closest('.board-link') : null;
-  const target = link && link.dataset.id !== state.active ? link : null;
+  const target = link && !link.dataset.current && link.dataset.path ? link : null;
   if (target !== d.link) {
     if (d.link) d.link.classList.remove('drop-target');
     d.link = target;
     if (target) target.classList.add('drop-target');
     d.ghost.classList.toggle('over-board', !!target);
-    if (target) dockHint(`Move to ${state.boards.find(b => b.id === target.dataset.id).name}`);
+    if (target) dockHint(`Move to ${baseName(target.dataset.path)}`);
     else dockHint(app.classList.contains('collapsed') ? 'Drag to reorder' : 'Drag to reorder, or drop on a board');
   }
   if (target) return;
@@ -457,9 +500,9 @@ function finishDrag(cancel) {
     setTimeout(end, 650);
   };
   if (!cancel && d.link) {
-    const targetId = d.link.dataset.id;
-    moveItem(d.it, targetId);
-    const link = listEl.querySelector(`.board-link[data-id="${targetId}"]`);
+    const targetPath = d.link.dataset.path;
+    moveItem(d.it, targetPath);
+    const link = [...listEl.querySelectorAll('.board-link')].find(l => l.dataset.path === targetPath);
     const th = link ? link.querySelector('.thumb').getBoundingClientRect() : { left: d.x, top: d.y, width: 18 };
     settle(th.left, th.top, th.width / d.w, () => { if (link) { link.classList.remove('received'); void link.offsetWidth; link.classList.add('received'); } });
     return;
@@ -478,19 +521,28 @@ function commitOrder(order) {
   renderSidebar();
 }
 
-function moveItem(it, boardId) {
-  const fromBoard = it.boardId, fromPos = it.pos;
-  const b = state.boards.find(x => x.id === boardId);
-  it.boardId = boardId; it.pos = Date.now();
-  b.updatedAt = Date.now(); touch();
+// Moving a card to another board writes it straight into that board's file.
+// It leaves this board as an unsaved change; its image stays in the session
+// folder, so undo can put it back.
+async function moveItem(it, path) {
+  const session = project.dir, name = baseName(path);
+  const putBack = () => {
+    state.items.push(it); touch();
+    renderGrid({ fresh: new Set([it.id]), animate: true }); renderHead(); renderSidebar();
+  };
+  state.items = state.items.filter(i => i !== it); touch();
   renderGrid({ animate: true }); renderHead(); renderSidebar();
-  toast(`Moved to ${b.name}`, {
+  try {
+    await invoke('project_add_items', { path, items: [{ ...manifestItem(it), pos: Date.now() }] });
+  } catch (e) { putBack(); return toast(errMsg(e)); }
+  refreshLibrary([path]);
+  toast(`Moved to ${name}`, {
     thumb: thumbOf(it), action: 'Undo',
-    onAction: () => {
-      it.boardId = fromBoard; it.pos = fromPos; touch();
-      if (fromBoard === state.active) renderGrid({ fresh: new Set([it.id]), animate: true });
-      renderHead(); renderSidebar();
-    },
+    onAction: () => exclusive(async () => {
+      if (project.dir !== session) return toast('The move can’t be undone after switching boards');
+      await invoke('project_remove_items', { path, ids: [it.id] });
+      putBack(); refreshLibrary([path]);
+    }),
   });
 }
 
@@ -545,7 +597,7 @@ function extOf(blob) {
 async function itemFromBlob(blob, source = null) {
   const bmp = await createImageBitmap(blob);
   const id = uid(), file = `${id}.${extOf(blob)}`;
-  const it = { id, boardId: state.active, file, w: bmp.width, h: bmp.height, ...readColors(bmp), createdAt: Date.now(), source };
+  const it = { id, file, w: bmp.width, h: bmp.height, ...readColors(bmp), createdAt: Date.now(), source };
   bmp.close && bmp.close();
   await invoke('image_put', new Uint8Array(await blob.arrayBuffer()), { headers: { 'x-file': file } });
   return it;
@@ -566,7 +618,7 @@ async function addUrl(url) {
   } catch {
     const img = new Image();
     // The site blocks downloads, so keep it as a link. It needs a connection to show.
-    img.onload = () => commit([{ id: uid(), boardId: state.active, src: url, w: img.naturalWidth, h: img.naturalHeight, color: null, cors: false, createdAt: Date.now(), source: url }], { linked: true });
+    img.onload = () => commit([{ id: uid(), src: url, w: img.naturalWidth, h: img.naturalHeight, color: null, cors: false, createdAt: Date.now(), source: url }], { linked: true });
     img.onerror = () => toast('Couldn’t find an image at that link');
     img.src = url;
   }
@@ -614,7 +666,7 @@ window.addEventListener('drop', e => {
   if (!dragOk(e)) return;
   e.preventDefault(); dragDepth = 0; drop.classList.remove('on');
   if ([...e.dataTransfer.files].some(f => /\.trv$/i.test(f.name))) {
-    return toast(`Open projects with ${MOD} O, or double-click the file`);
+    return toast(`Open boards with ${MOD} O, or double-click the .trv file`);
   }
   const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
   if (files.length) return addFiles(files);
@@ -634,9 +686,8 @@ function removeItem(it) {
 }
 function restore() {
   const it = undo.pop(); if (!it) return;
-  if (!state.boards.find(b => b.id === it.boardId)) return;
   state.items.push(it); touch();
-  if (it.boardId === state.active) { renderGrid({ fresh: new Set([it.id]), animate: true }); renderHead(); }
+  renderGrid({ fresh: new Set([it.id]), animate: true }); renderHead();
   renderSidebar(); toast('Restored');
 }
 // Project images are read through Rust: drawing an asset-protocol image onto a
@@ -694,127 +745,93 @@ function resetDock() {
 }
 
 /* ───────── boards ───────── */
-function selectBoard(id) {
-  if (id === state.active) return;
-  const prev = activeBoard();
-  if (prev && prev.name === 'Untitled board' && !boardItems(prev.id).length && state.boards.length > 1) {
-    state.boards = state.boards.filter(b => b !== prev); touch();
-  }
-  state.active = id;
-  closeMenu();
+// A new board is a new, unsaved project with its title ready to type into.
+async function newBoard() {
+  if (!await guardUnsaved()) return;
+  loadProject(await invoke('project_new'), null);
   if (app.classList.contains('narrow')) app.classList.add('collapsed');
-  clearGrid(); scroll.scrollTop = 0; updateHeader();
-  head.classList.remove('swap'); void head.offsetWidth; head.classList.add('swap');
-  renderHead(); renderSidebar(); renderGrid({ entrance: true, recount: true });
-  resetDock();
+  focusTitle();
 }
-function newBoard() {
-  const now = Date.now();
-  const b = { id: uid(), name: 'Untitled board', createdAt: now, updatedAt: now };
-  state.boards.push(b); touch();
-  state.query = ''; searchEl.value = '';
-  selectBoard(b.id);
-  requestAnimationFrame(() => {
-    titleEl.focus();
-    const r = document.createRange(); r.selectNodeContents(titleEl);
-    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-  });
-}
-function deleteBoard(id) {
-  state.boards = state.boards.filter(b => b.id !== id);
-  state.items = state.items.filter(i => i.boardId !== id);
-  touch();
-  if (!state.boards.length) return newBoard();
-  if (id === state.active) {
-    const next = [...state.boards].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-    state.active = null; selectBoard(next.id);
-  } else renderSidebar();
+// Deleting a saved board moves its file to the Recycle Bin / Trash. Deleting
+// the open board then opens the most recently used one (or a new board).
+async function deleteBoard(path) {
+  const isOpen = !path || samePath(path, project.path);
+  const name = path ? baseName(path) : project.name;
+  if (path) { await invoke('project_delete', { path }); forgetBoard(path); }
+  if (isOpen) {
+    let opened = null, next = null;
+    for (const p of library) {
+      try { opened = await invoke('project_open', { path: p }); next = p; break; }
+      catch (e) { if (/no longer exists/.test(errMsg(e))) forgetBoard(p); }
+    }
+    loadProject(opened || await invoke('project_new'), next);
+    if (next) rememberBoard(next);
+  }
+  renderSidebar();
+  toast(path ? `Moved ${name} to the ${TRASH}` : 'Board discarded');
 }
 
 /* ───────── menu ───────── */
-let menuFor = null;
-function openBoardMenu(id, anchor, linkEl) {
-  if (menuFor === id && menu.classList.contains('open')) return closeMenu();
-  closeMenu();
-  menuFor = id; linkEl && linkEl.classList.add('menu-open');
-  menu.innerHTML = `
-    <button data-m="rename"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M10.5 2.5 13.5 5.5 6 13H3v-3z"/></svg>Rename</button>
-    <button data-m="delete" class="danger"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 8.4a1.5 1.5 0 0 0 1.5 1.35h3.3a1.5 1.5 0 0 0 1.5-1.35l.6-8.4"/></svg><span>Delete board</span></button>`;
-  const r = anchor.getBoundingClientRect();
-  menu.classList.remove('wide');
-  menu.style.left = Math.min(r.left, innerWidth - 184) + 'px'; menu.style.top = (r.bottom + 6) + 'px'; menu.style.bottom = '';
-  menu.style.transformOrigin = 'top left';
-  requestAnimationFrame(() => menu.classList.add('open'));
-}
-
 const ICON = {
-  new: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg>',
   open: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2.25 4.25a1.5 1.5 0 0 1 1.5-1.5h2.6l1.4 1.5h4.5a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5h-8.5a1.5 1.5 0 0 1-1.5-1.5z"/></svg>',
+  rename: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M10.5 2.5 13.5 5.5 6 13H3v-3z"/></svg>',
   save: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.75v7.5M5 7.5l3 3 3-3M3 12.75h10"/></svg>',
-  saveAs: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M10.5 2.5 13.5 5.5 6 13H3v-3z"/></svg>',
-  file: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M4.25 2.25h5l2.5 2.5v9h-7.5z"/><path d="M9.25 2.25v2.5h2.5"/></svg>',
+  saveAs: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M4.25 2.25h5l2.5 2.5v9h-7.5z"/><path d="M9.25 2.25v2.5h2.5"/></svg>',
+  hide: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M3.5 8h9"/></svg>',
   trash: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 8.4a1.5 1.5 0 0 0 1.5 1.35h3.3a1.5 1.5 0 0 0 1.5-1.35l.6-8.4"/></svg>',
 };
-const projectBtn = $('#projectBtn');
-function openProjectMenu() {
-  if (menuFor === 'project' && menu.classList.contains('open')) return closeMenu();
+// `target`: { path, current, link } for a sidebar row, or the open board.
+let menuFor = null;
+function openBoardMenu(target, anchor, alignRight = false) {
+  const key = target.current ? 'current' : target.path;
+  if (menuFor && menuFor.key === key && menu.classList.contains('open')) return closeMenu();
   closeMenu();
-  menuFor = 'project'; projectBtn.classList.add('menu-open');
-  const others = recent().filter(p => !samePath(p, project.path)).slice(0, 6);
-  const item = (m, icon, label, kbd, extra = '') =>
-    `<button data-m="${m}" ${extra}>${icon}<span class="grow">${label}</span>${kbd ? `<span class="kbd">${kbd}</span>` : ''}</button>`;
+  menuFor = { ...target, key };
+  if (target.link) target.link.classList.add('menu-open');
+  const item = (m, icon, label, kbd = '') =>
+    `<button data-m="${m}">${icon}<span class="grow">${label}</span>${kbd ? `<span class="kbd">${kbd}</span>` : ''}</button>`;
   menu.innerHTML = [
-    item('new', ICON.new, 'New project', `${MOD} Shift N`),
-    item('open', ICON.open, 'Open…', `${MOD} O`),
-    item('save', ICON.save, 'Save', `${MOD} S`),
-    item('save-as', ICON.saveAs, 'Save as…', `${MOD} Shift S`),
-    others.length ? '<div class="menu-sep"></div><div class="menu-label">Recent</div>' : '',
-    ...others.map(p => item('recent', ICON.file, esc(baseName(p)), '', `data-path="${esc(p)}" title="${esc(p)}"`)),
+    ...(target.current
+      ? [item('rename', ICON.rename, 'Rename'), item('save', ICON.save, 'Save', `${MOD} S`), item('save-as', ICON.saveAs, 'Save as…', `${MOD} Shift S`)]
+      : [item('open', ICON.open, 'Open'), item('hide', ICON.hide, 'Remove from sidebar')]),
     '<div class="menu-sep"></div>',
-    `<button data-m="delete-project" class="danger">${ICON.trash}<span>${project.path ? 'Delete project…' : 'Discard project…'}</span></button>`,
+    `<button data-m="delete" class="danger">${ICON.trash}<span>${target.path ? 'Delete board' : 'Discard board'}</span></button>`,
   ].join('');
-  const r = projectBtn.getBoundingClientRect();
+  const r = anchor.getBoundingClientRect();
   menu.classList.add('wide');
-  menu.style.left = r.left + 'px'; menu.style.top = 'auto'; menu.style.bottom = (innerHeight - r.top + 6) + 'px';
-  menu.style.transformOrigin = 'bottom left';
+  const w = 248;
+  menu.style.left = (alignRight ? r.right - w : Math.min(r.left, innerWidth - w - 8)) + 'px';
+  menu.style.top = (r.bottom + 6) + 'px'; menu.style.bottom = '';
+  menu.style.transformOrigin = alignRight ? 'top right' : 'top left';
   requestAnimationFrame(() => menu.classList.add('open'));
 }
-projectBtn.addEventListener('click', e => { e.stopPropagation(); openProjectMenu(); });
-
 function closeMenu() {
   menu.classList.remove('open'); menuFor = null;
   listEl.querySelectorAll('.menu-open').forEach(el => el.classList.remove('menu-open'));
-  projectBtn.classList.remove('menu-open');
 }
 menu.addEventListener('click', e => {
   const btn = e.target.closest('[data-m]'); if (!btn || !menuFor) return;
-  const id = menuFor;
-  if (id === 'project') {
-    closeMenu();
-    const m = btn.dataset.m;
-    if (m === 'new') exclusive(newProject);
-    else if (m === 'open') exclusive(() => openProject());
-    else if (m === 'save') exclusive(() => saveProject());
-    else if (m === 'save-as') exclusive(() => saveProject({ as: true }));
-    else if (m === 'recent') exclusive(() => openProject(btn.dataset.path));
-    else if (m === 'delete-project') exclusive(deleteProject);
-    return;
-  }
-  if (btn.dataset.m === 'rename') {
-    closeMenu();
-    if (id !== state.active) selectBoard(id);
-    requestAnimationFrame(() => { titleEl.focus(); const r = document.createRange(); r.selectNodeContents(titleEl); const s = getSelection(); s.removeAllRanges(); s.addRange(r); });
-  } else if (btn.dataset.m === 'delete') {
+  const t = menuFor, m = btn.dataset.m;
+  if (m === 'delete') {
+    // Two clicks, like the mockup: the first arms the button.
     if (!btn.classList.contains('confirm')) {
-      btn.classList.add('confirm'); btn.querySelector('span').textContent = 'Click again to delete';
+      btn.classList.add('confirm');
+      btn.querySelector('span').textContent = t.path ? `Click again to move to the ${TRASH}` : 'Click again to discard';
       return;
     }
-    closeMenu(); deleteBoard(id);
+    closeMenu(); exclusive(() => deleteBoard(t.path));
+    return;
   }
+  closeMenu();
+  if (m === 'rename') focusTitle();
+  else if (m === 'save') exclusive(() => saveProject());
+  else if (m === 'save-as') exclusive(() => saveProject({ as: true }));
+  else if (m === 'open') exclusive(() => openProject(t.path));
+  else if (m === 'hide') { forgetBoard(t.path); renderSidebar(); toast(`Removed ${baseName(t.path)} from the sidebar. The file is untouched.`); }
 });
 $('#boardMenuBtn').addEventListener('click', e => {
-  e.stopPropagation(); openBoardMenu(state.active, e.currentTarget);
-  const r = e.currentTarget.getBoundingClientRect(); menu.style.left = (r.right - 176) + 'px'; menu.style.transformOrigin = 'top right';
+  e.stopPropagation();
+  openBoardMenu({ path: project.path, current: true }, e.currentTarget, true);
 });
 document.addEventListener('click', e => { if (!e.target.closest('.menu')) closeMenu(); });
 
@@ -841,71 +858,88 @@ function closeFocus() { focus.classList.remove('open'); focus.setAttribute('aria
 function stepFocus(d) { const n = boardItems().length; if (!n) return; focusIdx = (focusIdx + d + n) % n; showFocus(); }
 focus.addEventListener('click', e => { if (e.target === focus || e.target.classList.contains('focus-stage')) closeFocus(); });
 
-/* ───────── projects ───────── */
-const modal = $('#modal'), sideFoot = $('#sideFoot');
-const FILTERS = [{ name: 'Trove project', extensions: ['trv'] }];
+/* ───────── projects: one board per .trv file ───────── */
+const modal = $('#modal');
+const FILTERS = [{ name: 'Trove board', extensions: ['trv'] }];
 const fileName = p => p.split(/[\\/]/).pop();
 const baseName = p => fileName(p).replace(/\.trv$/i, '');
-const projectName = () => project.path ? baseName(project.path) : 'Untitled project';
 const samePath = (a, b) => !!a && !!b && (isWin ? a.toLowerCase() === b.toLowerCase() : a === b);
 const hasWork = () => project.dirty && (project.path || state.items.length > 0);
+const safeFileName = name => name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '') || 'Untitled board';
 
-// Recently opened or saved projects, newest first.
-function recent() {
-  try { const r = JSON.parse(localStorage.getItem('trove.recent')); return Array.isArray(r) ? r.filter(p => typeof p === 'string') : []; }
-  catch { return []; }
+// The library list lives in localStorage; the files themselves are the truth.
+function loadLibrary() {
+  try {
+    const raw = localStorage.getItem('trove.library') ?? localStorage.getItem('trove.recent');
+    const list = JSON.parse(raw);
+    library = Array.isArray(list) ? list.filter(p => typeof p === 'string') : [];
+  } catch { library = []; }
 }
-function remember(path) { localStorage.setItem('trove.recent', JSON.stringify([path, ...recent().filter(p => !samePath(p, path))].slice(0, 10))); }
-function forget(path) { localStorage.setItem('trove.recent', JSON.stringify(recent().filter(p => !samePath(p, path)))); }
+function saveLibrary() { localStorage.setItem('trove.library', JSON.stringify(library)); }
+function rememberBoard(path) { library = [path, ...library.filter(p => !samePath(p, path))]; saveLibrary(); }
+function forgetBoard(path) {
+  library = library.filter(p => !samePath(p, path));
+  for (const k of libInfo.keys()) if (samePath(k, path)) libInfo.delete(k);
+  saveLibrary();
+}
+// Re-reads saved boards for the sidebar. Files that are gone drop out.
+async function refreshLibrary(paths = library) {
+  if (!paths.length) return renderSidebar();
+  let infos = [];
+  try { infos = await invoke('library_info', { paths }); } catch (e) { console.warn(e); }
+  for (const i of infos) {
+    if (i.error && /no longer exists/.test(i.error)) forgetBoard(i.path);
+    else libInfo.set(i.path, i);
+  }
+  renderSidebar();
+}
 
 let shownTitle = '';
 function renderProject() {
-  const name = projectName();
-  $('#projectName').textContent = name;
-  projectBtn.title = project.path || 'Not saved yet';
-  const status = project.dirty ? 'Unsaved changes' : project.path ? 'Saved' : 'Not saved yet';
-  $('#projectStatus').textContent = `${plural(state.items.length, 'reference')} · ${status}`;
-  sideFoot.classList.toggle('dirty', project.dirty);
-  const title = `${project.dirty ? '*' : ''}${name} — Trove`;
+  app.classList.toggle('dirty', project.dirty);
+  const title = `${project.dirty ? '*' : ''}${project.name} — Trove`;
   if (title !== shownTitle) { shownTitle = title; document.title = title; appWindow.setTitle(title).catch(() => {}); }
 }
 
-// Every edit to boards or images goes through here.
-function touch() { project.rev++; project.dirty = true; renderProject(); }
+// Every edit to the board goes through here.
+function touch() { project.rev++; project.dirty = true; project.updatedAt = Date.now(); renderProject(); }
 
+const manifestItem = ({ id, kind, text, file, src, w, h, color, tone, createdAt, pos, source }) =>
+  ({ id, kind, text, file, src, w, h, color, tone, createdAt, pos, source });
 function manifest() {
   return {
-    format: 'trove', version: 1, savedAt: Date.now(), activeBoard: state.active,
-    boards: state.boards.map(({ id, name, createdAt, updatedAt }) => ({ id, name, createdAt, updatedAt })),
-    items: state.items.map(({ id, boardId, file, src, w, h, color, tone, createdAt, pos, source }) =>
-      ({ id, boardId, file, src, w, h, color, tone, createdAt, pos, source })),
+    format: 'trove', version: 2,
+    createdAt: project.createdAt, updatedAt: project.updatedAt, savedAt: Date.now(),
+    items: state.items.map(manifestItem),
   };
 }
 
-// Swaps in a project returned by project_new / project_open.
+// Swaps in a board returned by project_new / project_open.
 function loadProject({ dir, manifest: m }, path) {
-  Object.assign(project, { path, dir, sep: dir.includes('\\') ? '\\' : '/', dirty: false, rev: 0 });
+  const previous = project.path, now = Date.now();
+  Object.assign(project, {
+    path, dir, sep: dir.includes('\\') ? '\\' : '/', dirty: false, rev: 0,
+    name: path ? baseName(path) : 'Untitled board',
+    createdAt: +(m && m.createdAt) || now,
+    updatedAt: +(m && (m.updatedAt || m.savedAt)) || now,
+  });
   urls.clear(); undo.length = 0;
-  const now = Date.now();
-  state.boards = (m && Array.isArray(m.boards) ? m.boards : [])
-    .filter(b => b && b.id)
-    .map(b => ({ id: String(b.id), name: String(b.name || 'Untitled board'), createdAt: +b.createdAt || now, updatedAt: +b.updatedAt || now }));
-  if (!state.boards.length) state.boards.push({ id: uid(), name: 'Untitled board', createdAt: now, updatedAt: now });
-  const ids = new Set(state.boards.map(b => b.id));
   // Same naming rule the Rust side enforces when unpacking; links must be web addresses.
+  // (Version 1 files held several boards: all their items land on this one.)
   const usable = i => typeof i.file === 'string' ? /^[A-Za-z0-9_-]{1,64}\.[A-Za-z0-9]{1,5}$/.test(i.file)
     : typeof i.src === 'string' && /^https?:\/\//i.test(i.src);
   state.items = (m && Array.isArray(m.items) ? m.items : [])
-    .filter(i => i && i.id && ids.has(i.boardId) && usable(i) && i.w > 0 && i.h > 0);
-  state.active = m && ids.has(m.activeBoard) ? m.activeBoard : [...state.boards].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
+    .filter(i => i && i.id && usable(i) && i.w > 0 && i.h > 0);
   state.query = ''; searchEl.value = '';
   closeFocus(); closeMenu(); clearGrid();
   scroll.scrollTop = 0; updateHeader();
   head.classList.remove('swap'); void head.offsetWidth; head.classList.add('swap');
   renderHead(); renderSidebar(); renderGrid({ entrance: true, recount: true }); resetDock();
+  // The board we left needs a fresh summary for its sidebar row.
+  if (previous && !samePath(previous, path)) refreshLibrary([previous]);
 }
 
-// One project operation at a time (saving while a dialog is open, double shortcuts...).
+// One board operation at a time (a save while a dialog is open, double shortcuts...).
 let busy = false;
 async function exclusive(fn) {
   if (busy) return;
@@ -919,7 +953,7 @@ async function exclusive(fn) {
 async function guardUnsaved() {
   if (!hasWork()) return true;
   const choice = await confirmDialog({
-    title: `Save changes to “${projectName()}”?`,
+    title: `Save changes to “${project.name}”?`,
     body: 'Your changes will be lost if you don’t save them.',
     buttons: [
       { label: 'Don’t save', value: 'discard', start: true },
@@ -931,69 +965,47 @@ async function guardUnsaved() {
   return choice === 'discard';
 }
 
-async function newProject() {
-  if (!await guardUnsaved()) return;
-  loadProject(await invoke('project_new'), null);
-}
-
+// Opens a board from a path, or asks for one.
 async function openProject(path) {
   if (!path) {
-    path = await dialog.open({ title: 'Open project', filters: FILTERS, multiple: false, directory: false });
+    path = await dialog.open({ title: 'Open board', filters: FILTERS, multiple: false, directory: false });
     if (!path) return;
   }
-  if (samePath(path, project.path) && !project.dirty) return toast(`${projectName()} is already open`);
+  if (samePath(path, project.path) && !project.dirty) return;
   if (!await guardUnsaved()) return;
   try {
     loadProject(await invoke('project_open', { path }), path);
-    remember(path);
-    toast(`Opened ${projectName()}`);
+    rememberBoard(path);
+    if (app.classList.contains('narrow')) app.classList.add('collapsed');
   } catch (e) {
     const msg = errMsg(e);
-    if (/no longer exists/.test(msg)) forget(path);
+    if (/no longer exists/.test(msg)) forgetBoard(path);
     toast(msg);
   }
+  renderSidebar();
 }
 
-// Resolves true once the project is safely on disk.
+// Resolves true once the board is safely on disk.
 async function saveProject({ as = false } = {}) {
   if (document.activeElement === titleEl) titleEl.blur(); // keep a rename in progress
   let path = project.path;
   if (as || !path) {
-    path = await dialog.save({ title: 'Save project', filters: FILTERS, defaultPath: project.path || `${projectName()}.trv` });
+    path = await dialog.save({ title: 'Save board', filters: FILTERS, defaultPath: project.path || `${safeFileName(project.name)}.trv` });
     if (!path) return false;
   }
   const rev = project.rev;
   try {
     const res = await invoke('project_save', { path, manifest: manifest() });
-    project.path = res.path;
+    project.path = res.path; project.name = baseName(res.path);
     project.dirty = project.rev !== rev; // edits made while saving still count
-    remember(res.path);
-    renderProject();
-    toast(res.missing ? `Saved, but ${plural(res.missing, 'image')} couldn’t be found` : `Saved ${projectName()}`);
+    rememberBoard(res.path);
+    renderHead(); renderSidebar();
+    toast(res.missing ? `Saved, but ${plural(res.missing, 'image')} couldn’t be found` : `Saved ${project.name}`);
     return true;
   } catch (e) {
     toast(errMsg(e));
     return false;
   }
-}
-
-// Saved projects go to the Recycle Bin / Trash; unsaved ones are discarded.
-async function deleteProject() {
-  const path = project.path, name = projectName();
-  if (!path && !hasWork()) return toast('Nothing to discard yet');
-  const ok = await confirmDialog(path ? {
-    title: `Delete “${name}”?`,
-    body: `${fileName(path)} will be moved to the ${TRASH}. You can restore it from there.`,
-    buttons: [{ label: 'Cancel', value: false, cancel: true, focus: true }, { label: 'Delete', value: true, kind: 'danger' }],
-  } : {
-    title: 'Discard this project?',
-    body: 'It hasn’t been saved, so its boards and images will be gone.',
-    buttons: [{ label: 'Cancel', value: false, cancel: true, focus: true }, { label: 'Discard', value: true, kind: 'danger' }],
-  });
-  if (!ok) return;
-  if (path) { await invoke('project_delete', { path }); forget(path); }
-  loadProject(await invoke('project_new'), null);
-  toast(path ? `Moved ${name} to the ${TRASH}` : 'Project discarded');
 }
 
 /* In-app dialog. Resolves with the clicked button's value, or the cancel
@@ -1045,7 +1057,8 @@ appWindow.onCloseRequested(async e => {
 document.addEventListener('click', e => {
   const a = e.target.closest('[data-action]'); if (!a) return;
   const act = a.dataset.action;
-  if (act === 'new-board') newBoard();
+  if (act === 'new-board') exclusive(newBoard);
+  else if (act === 'open-board') exclusive(() => openProject());
   else if (act === 'toggle-sidebar') toggleSidebar();
   else if (act === 'pin') togglePin();
   else if (act === 'toggle-theme') toggleTheme();
@@ -1117,7 +1130,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'F5' || (mod && k === 'r')) { e.preventDefault(); return; }
   if (mod && k === 's') { e.preventDefault(); exclusive(() => saveProject({ as: e.shiftKey })); return; }
   if (mod && k === 'o') { e.preventDefault(); exclusive(() => openProject()); return; }
-  if (mod && e.shiftKey && k === 'n') { e.preventDefault(); exclusive(newProject); return; }
+  if (mod && k === 'n') { e.preventDefault(); exclusive(newBoard); return; }
   if (drag && drag.active && e.key === 'Escape') { e.preventDefault(); finishDrag(true); drag = null; return; }
   if (focus.classList.contains('open')) {
     if (e.key === 'Escape' || e.key === ' ') { e.preventDefault(); closeFocus(); }
@@ -1126,7 +1139,6 @@ document.addEventListener('keydown', e => {
     else if (e.key === 'Delete' || e.key === 'Backspace') removeItem(boardItems()[focusIdx]);
     return;
   }
-  if (mod && e.key.toLowerCase() === 'n') { e.preventDefault(); newBoard(); return; }
   if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); searchEl.focus(); searchEl.select(); return; }
   if (mod && e.key.toLowerCase() === 'b') { e.preventDefault(); toggleSidebar(); return; }
   if (mod && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); togglePin(); return; }
@@ -1161,17 +1173,19 @@ booted = (async function boot() {
   applyNarrow();
   // Listen before asking for the launch file, so nothing slips between the two.
   await window.__TAURI__.event.listen('open-project', e => openFromOs(e.payload));
-  // Open the file Trove was launched with, else reopen the last project, else start fresh.
+  // Open the file Trove was launched with, else the last board, else a new one.
+  loadLibrary();
   const launch = await invoke('take_launch_path');
-  const first = launch || recent()[0];
+  const first = launch || library[0];
   let opened = null, problem = null;
   if (first) {
     try { opened = await invoke('project_open', { path: first }); }
-    catch (e) { problem = errMsg(e); if (/no longer exists/.test(problem)) forget(first); }
+    catch (e) { problem = errMsg(e); if (/no longer exists/.test(problem)) forgetBoard(first); }
   }
   loadProject(opened || await invoke('project_new'), opened ? first : null);
-  if (opened) remember(first);
+  if (opened) rememberBoard(first);
   measureHead();
+  refreshLibrary(); // fills in the other boards' rows
   if (problem) toast(`Couldn’t ${launch ? 'open' : 'reopen'} ${baseName(first)}. ${problem}`);
   if (document.fonts) document.fonts.ready.then(measureHead);
   setInterval(renderHead, 30000);
