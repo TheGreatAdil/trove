@@ -6,7 +6,7 @@ Trove borrows from two apps. From Pinterest it takes collecting and browsing: bo
 
 ## Status
 
-Early. The Library view works: boards, the masonry grid, adding and organizing images, and saving everything as `.trv` project files. The Canvas view isn't built yet.
+Early. The Library view works: boards saved as `.trv` files, the masonry grid, images and text notes, organizing. The Canvas view isn't built yet.
 
 The UI started as a single-file HTML prototype (`design/trove.html`). It's kept locally for reference and isn't tracked in git.
 
@@ -23,7 +23,7 @@ cd src-tauri && cargo test    # project file format tests
 
 The frontend lives in `src/` (plain HTML, CSS and JavaScript, served as-is). The Rust side lives in `src-tauri/`. `src-tauri/src/project.rs` owns the `.trv` format, and `src-tauri/src/lib.rs` holds the commands the frontend calls.
 
-Double-clicking `.trv` files only works once Trove is installed, because the installer registers the file type. During `tauri dev`, use Open (`Ctrl O`) instead.
+Double-clicking `.trv` files only works once Trove is installed, because the installer registers the file type. During `tauri dev`, use Open board (`Ctrl O`) instead.
 
 Recommended editor setup: [VS Code](https://code.visualstudio.com/) with the [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) and [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer) extensions.
 
@@ -38,17 +38,20 @@ Recommended editor setup: [VS Code](https://code.visualstudio.com/) with the [Ta
 
 ## What the app does
 
-**Projects**
-- A project is one `.trv` file holding a set of boards and all their images. One project is open at a time.
-- The sidebar footer shows the project's name, how many images it holds, and whether it has unsaved changes. Click it for the project menu: New project, Open, Save, Save as, recent projects, and Delete project.
-- Delete project moves the `.trv` file to the Recycle Bin (Trash on macOS and Linux) after you confirm, so it can be restored. An unsaved project is discarded instead.
-- Double-click a `.trv` file to open it in Trove. If Trove is already running, the open window switches to that project.
-- Before New, Open or closing the window throws away unsaved work, Trove asks whether to save. The window title shows a `*` while there are unsaved changes.
-- The last project reopens when Trove starts.
+**Boards are files**
+- Every board is its own project: one `.trv` file holding the board's images and notes. One board is open at a time.
+- New board (`Ctrl N`) starts an unsaved board with its title ready to type. Save (`Ctrl S`) asks where to put it the first time, suggesting the board's name.
+- Renaming a saved board renames its file.
+- The board menu (the `···` button in the header) has Rename, Save, Save as and Delete board. Delete moves the `.trv` file to the Recycle Bin (Trash on macOS and Linux) after a second click, so it can be restored. An unsaved board is discarded instead.
+- Double-click a `.trv` file to open it in Trove. If Trove is already running, the open window switches to that board.
+- Before switching boards or closing the window throws away unsaved work, Trove asks whether to save. Unsaved changes show as a dot on the board's row and next to its title, and as a `*` in the window title.
+- The last board reopens when Trove starts.
 
-**Sidebar**
-- Boards grouped by when they last changed (Today, Yesterday, Previous 7 days, Previous 30 days, Earlier), each with a thumbnail and an image count.
-- Search to filter boards, and a New board button.
+**Sidebar: your board library**
+- Every saved board Trove knows about, plus the open one, grouped by when they last changed (Today, Yesterday, This week, This month, Earlier). Each row shows a cover image and how many cards the board holds, read from the file without opening it.
+- Click a row to open that board. Open board… (`Ctrl O`) adds a `.trv` from anywhere to the library.
+- A row's `···` menu can open the board, remove it from the sidebar (the file is left alone), or delete it.
+- Search filters the boards by name.
 - Collapses out of the way. In windows narrower than 860px it slides over the board instead.
 
 **Board header**
@@ -66,17 +69,25 @@ Recommended editor setup: [VS Code](https://code.visualstudio.com/) with the [Ta
 - Images are copied into the project, so a `.trv` file is self-contained. Pasting a link downloads the image. If the site won't allow the download, the image is kept as a web link and needs a connection to show.
 - An empty board says "Paste anything." and shows Ctrl and V keycaps that press down as you type them.
 
+**Notes**
+- The dock at the bottom of the board is a composer. Type into it, or just start typing anywhere on the board, and press Enter: the note lands on the board as a text card. Shift+Enter adds a line, Esc closes it.
+- Notes are set as type: a hairline rule and the words. A few words are set large and condensed, and a paragraph reads as body text. Size, weight, width and line spacing follow one continuous curve over the note's length (Mona Sans' variable axes), and scale with the column width like the images do.
+- Each note card is exactly as tall as its text, so nothing is cut off.
+- While you type, the composer previews the note on the same curve.
+- A note whose last line starts with "—" reads as a quote: the opening quotation mark hangs into the margin and the source sits small underneath.
+- A link typed into the composer is added as an image if it is one, and as a note if not.
+- Hover a note for a tab on its rule showing when it was written, with Copy and Remove. Click it to read it large in focus view.
+
 **Organizing**
 - Drag cards to reorder them.
-- Drag a card onto a board in the sidebar to move it there. Moves can be undone.
-- Deleting a board takes two clicks.
+- Drag a card onto another board in the sidebar to move it into that board's file. Moves can be undone until you switch boards.
 
 **Focus view**
 - Click an image, or hover it and press Space, to show it on its own. Arrow keys step through the board.
 - The footer shows the image's size, when it was added and its source domain, with Copy and Remove buttons.
 
 **Everything else**
-- A dock at the bottom of the board works as the Add button and doubles as a toast, with Undo when it applies.
+- Confirmations appear as a small toast above the composer, with Undo when it applies.
 - A Keep on top button keeps the window above other apps.
 - Light and dark themes.
 - Runs fully offline. The font ships with the app.
@@ -87,54 +98,57 @@ On macOS, Cmd replaces Ctrl.
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl S` | Save the project |
-| `Ctrl Shift S` | Save the project under a new name |
-| `Ctrl O` | Open a project |
-| `Ctrl Shift N` | New project |
-| `Ctrl V` | Paste an image or link into the current board |
 | `Ctrl N` | New board |
+| `Ctrl O` | Open a board file |
+| `Ctrl S` | Save the board |
+| `Ctrl Shift S` | Save the board under a new name |
+| `Ctrl V` | Paste an image or link into the current board |
+| Any letter | Start a note in the composer (`Enter` adds it, `Shift Enter` adds a line, `Esc` closes) |
 | `Ctrl K` | Search boards |
 | `Ctrl B` | Show or hide the sidebar |
 | `Ctrl Shift A` | Keep the window on top |
 | `Ctrl =` / `Ctrl -` | Bigger / smaller thumbnails |
-| `Ctrl Z` | Restore the last removed image |
-| `Space` | Open the hovered image in focus view (`Space` or `Esc` closes it) |
-| `←` / `→` | Previous / next image in focus view |
-| `Delete` | Remove the hovered or focused image |
-| `Ctrl C` | Copy the hovered image |
+| `Ctrl Z` | Restore the last removed card |
+| `Space` | Open the hovered card in focus view (`Space` or `Esc` closes it) |
+| `←` / `→` | Previous / next card in focus view |
+| `Delete` | Remove the hovered or focused card |
+| `Ctrl C` | Copy the hovered image or note |
 | `Esc` | Close a menu or focus view, or cancel a drag |
 
 ## The .trv format
 
-A `.trv` file is a zip archive:
+A `.trv` file is one board, stored as a zip archive:
 
 ```text
-project.json        boards, images and their metadata
-images/<id>.<ext>   every image in the project, in its original format
+project.json        the board's cards and their metadata
+images/<id>.<ext>   every image on the board, in its original format
 ```
 
-`project.json` looks like this:
+The board's name is the file's name. `project.json` looks like this:
 
 ```json
 {
   "format": "trove",
-  "version": 1,
+  "version": 2,
+  "createdAt": 1795990000000,
+  "updatedAt": 1795996000000,
   "savedAt": 1795996800000,
-  "activeBoard": "k3j9x2ab",
-  "boards": [{ "id": "k3j9x2ab", "name": "Slow light", "createdAt": 1795990000000, "updatedAt": 1795996000000 }],
   "items": [
-    { "id": "p0q8r7st", "boardId": "k3j9x2ab", "file": "p0q8r7st.png", "w": 1600, "h": 1200,
-      "color": "rgb(182, 140, 101)", "tone": [201, 132, 74], "createdAt": 1795995000000, "pos": 1795995000000 }
+    { "id": "p0q8r7st", "file": "p0q8r7st.png", "w": 1600, "h": 1200,
+      "color": "rgb(182, 140, 101)", "tone": [201, 132, 74], "createdAt": 1795995000000, "pos": 1795995000000 },
+    { "id": "n4m2k8qa", "kind": "text", "text": "Warm greys. Never pure black.",
+      "createdAt": 1795995600000, "pos": 1795995600000 }
   ]
 }
 ```
 
 - `file` names an image inside `images/`. Images kept as web links have `src` (their address) instead.
-- `color` is the image's average colour (the placeholder while it loads). `tone` is its dominant colour, used for the board palette.
-- `pos` sets the order within a board, highest first.
-- Trove refuses files whose `format` isn't `"trove"`, and files with a newer `version` than it understands.
+- Notes have `"kind": "text"` and their words in `text`.
+- `color` is an image's average colour (the placeholder while it loads). `tone` is its dominant colour, used for the board palette.
+- `pos` sets the order on the board, highest first.
+- Trove refuses files whose `format` isn't `"trove"`, and files with a newer `version` than it understands. Version 1 files, which held several boards, open as one board with all their cards.
 
-While a project is open, its images sit unpacked in a working folder under the app's cache directory (`%LOCALAPPDATA%\com.absideon.trove\sessions\` on Windows). The webview shows them from there. Saving packs them back into the `.trv`. Trove writes to a temporary file first and then swaps it in, so a failed save can't damage the existing file.
+While a board is open, its images sit unpacked in a working folder under the app's cache directory (`%LOCALAPPDATA%\com.absideon.trove\sessions\` on Windows). The webview shows them from there. Saving packs them back into the `.trv`. Trove writes to a temporary file first and then swaps it in, so a failed save can't damage the existing file. Moving a card to another board edits that board's file the same way, without opening it. The sidebar's cover images are unpacked into `thumbs\` in the same cache directory.
 
 ## Design direction
 
