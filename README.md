@@ -154,6 +154,7 @@ While a board is open, its images sit unpacked in a working folder under the app
 
 ## Design direction
 
+- **Logo:** the masonry mark (two columns of rounded tiles, staggered like a board), light on a rounded near-black square with one tile in the accent orange. The same mark is the app icon (`src-tauri/icons`, generated with `bun run tauri icon`) and the logo in the sidebar.
 - **Type:** Mona Sans for the interface, a variable font with adjustable width and weight. Notes are set in Geist. Both are bundled in `src/fonts` under the SIL Open Font License. Titles are large and tight: 52px, weight 580, letter spacing -0.052em. Body text is 13.5px.
 - **Colour:** a warm off-white light theme, a near-black dark theme, and one orange accent.
 
