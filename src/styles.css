@@ -221,18 +221,10 @@ body.dragging .board-link .more { opacity: 0 !important; }
   transition: left var(--t-side) var(--ease-out), background .3s;
 }
 .app.collapsed .stage { left: var(--inset); }
-/* Images dissolve into the panel as they reach the top edge: an eased opacity ramp on the
-   scroller itself, so there is no tinted overlay and no edge where an effect stops. */
 .scroll {
   position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden;
   padding-top: var(--head-h, 170px);
   scrollbar-width: none;
-  --fade: linear-gradient(to bottom,
-    transparent 0, transparent 18px,
-    rgba(0, 0, 0, .05) 34px, rgba(0, 0, 0, .16) 50px, rgba(0, 0, 0, .36) 66px,
-    rgba(0, 0, 0, .62) 82px, rgba(0, 0, 0, .84) 98px, rgba(0, 0, 0, .96) 112px, #000 124px);
-  -webkit-mask-image: var(--fade);
-          mask-image: var(--fade);
 }
 .scroll::-webkit-scrollbar { display: none; }
 
@@ -243,40 +235,37 @@ body.dragging .board-link .more { opacity: 0 !important; }
 }
 .app.collapsed .collapsed-tools { opacity: 1; pointer-events: auto; transition-delay: .25s; }
 
-/* Header floats above the grid; images slide under a progressive blur */
+/* Header floats above the grid; cards slide under it into a gradual blur */
 .top {
   position: absolute; top: 0; left: 0; right: 0; z-index: 3;
-  height: 124px; /* matches the fade on .scroll */
+  height: 124px;
   pointer-events: none;
 }
-/* A light blur that only builds where images are already fading, capped at 4px so the
-   panel colour in the gutters never smears into the photos. */
-.pblur { position: absolute; inset: 0; opacity: 0; transition: opacity .3s; }
-.top.scrolled .pblur { opacity: 1; }
-.pblur i { position: absolute; inset: 0; }
-.pblur i:nth-child(1) { backdrop-filter: blur(.4px); -webkit-backdrop-filter: blur(.4px); -webkit-mask-image: linear-gradient(to top, transparent 0%, #000 25%);  mask-image: linear-gradient(to top, transparent 0%, #000 25%); }
-.pblur i:nth-child(2) { backdrop-filter: blur(.8px); -webkit-backdrop-filter: blur(.8px); -webkit-mask-image: linear-gradient(to top, transparent 12%, #000 40%); mask-image: linear-gradient(to top, transparent 12%, #000 40%); }
-.pblur i:nth-child(3) { backdrop-filter: blur(1.4px); -webkit-backdrop-filter: blur(1.4px); -webkit-mask-image: linear-gradient(to top, transparent 26%, #000 55%); mask-image: linear-gradient(to top, transparent 26%, #000 55%); }
-.pblur i:nth-child(4) { backdrop-filter: blur(2.2px); -webkit-backdrop-filter: blur(2.2px); -webkit-mask-image: linear-gradient(to top, transparent 40%, #000 70%); mask-image: linear-gradient(to top, transparent 40%, #000 70%); }
-.pblur i:nth-child(5) { backdrop-filter: blur(3px);  -webkit-backdrop-filter: blur(3px);  -webkit-mask-image: linear-gradient(to top, transparent 55%, #000 85%); mask-image: linear-gradient(to top, transparent 55%, #000 85%); }
-.pblur i:nth-child(6) { backdrop-filter: blur(4px);  -webkit-backdrop-filter: blur(4px);  -webkit-mask-image: linear-gradient(to top, transparent 70%, #000 100%); mask-image: linear-gradient(to top, transparent 70%, #000 100%); }
-
-/* Cards slide under the dock into a gradual blur: each layer blurs one band of the strip,
-   twice as strongly every other band, and a tint of the panel colour settles over the edge. */
-.gblur { position: absolute; left: 0; right: 0; bottom: 0; height: var(--gblur-h, 128px); z-index: 5; pointer-events: none; }
-.gblur i { position: absolute; inset: 0; backdrop-filter: blur(var(--b)); -webkit-backdrop-filter: blur(var(--b)); -webkit-mask-image: var(--m); mask-image: var(--m); }
-.gblur i:nth-child(1) { --b: 2.8px; --m: linear-gradient(to bottom, transparent 0%, #000 12.5%, #000 25%, transparent 37.5%); }
-.gblur i:nth-child(2) { --b: 4.0px; --m: linear-gradient(to bottom, transparent 12.5%, #000 25%, #000 37.5%, transparent 50%); }
-.gblur i:nth-child(3) { --b: 5.7px; --m: linear-gradient(to bottom, transparent 25%, #000 37.5%, #000 50%, transparent 62.5%); }
-.gblur i:nth-child(4) { --b: 8.0px; --m: linear-gradient(to bottom, transparent 37.5%, #000 50%, #000 62.5%, transparent 75%); }
-.gblur i:nth-child(5) { --b: 11.3px; --m: linear-gradient(to bottom, transparent 50%, #000 62.5%, #000 75%, transparent 87.5%); }
-.gblur i:nth-child(6) { --b: 16.0px; --m: linear-gradient(to bottom, transparent 62.5%, #000 75%, #000 87.5%, transparent 100%); }
-.gblur i:nth-child(7) { --b: 22.6px; --m: linear-gradient(to bottom, transparent 75%, #000 87.5%, #000 100%); }
-.gblur i:nth-child(8) { --b: 32.0px; --m: linear-gradient(to bottom, transparent 87.5%, #000 100%); }
-.gblur::after {
-  content: ''; position: absolute; inset: 0;
-  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--bg) 60%, transparent));
+/* Eight stacked backdrop blurs, each confined to one band of the strip by its mask and
+   twice as strong every other band towards the top edge (up to 32px), with a tint of the
+   panel colour settling over the edge. It builds in once the board scrolls. */
+.pblur { position: absolute; inset: 0; }
+.pblur i {
+  position: absolute; inset: 0;
+  backdrop-filter: blur(0px); -webkit-backdrop-filter: blur(0px);
+  -webkit-mask-image: var(--m); mask-image: var(--m);
+  transition: backdrop-filter .3s, -webkit-backdrop-filter .3s;
 }
+.top.scrolled .pblur i { backdrop-filter: blur(var(--b)); -webkit-backdrop-filter: blur(var(--b)); }
+.pblur i:nth-child(1) { --b: 2.8px; --m: linear-gradient(to top, transparent 0%, #000 12.5%, #000 25%, transparent 37.5%); }
+.pblur i:nth-child(2) { --b: 4.0px; --m: linear-gradient(to top, transparent 12.5%, #000 25%, #000 37.5%, transparent 50%); }
+.pblur i:nth-child(3) { --b: 5.7px; --m: linear-gradient(to top, transparent 25%, #000 37.5%, #000 50%, transparent 62.5%); }
+.pblur i:nth-child(4) { --b: 8.0px; --m: linear-gradient(to top, transparent 37.5%, #000 50%, #000 62.5%, transparent 75%); }
+.pblur i:nth-child(5) { --b: 11.3px; --m: linear-gradient(to top, transparent 50%, #000 62.5%, #000 75%, transparent 87.5%); }
+.pblur i:nth-child(6) { --b: 16.0px; --m: linear-gradient(to top, transparent 62.5%, #000 75%, #000 87.5%, transparent 100%); }
+.pblur i:nth-child(7) { --b: 22.6px; --m: linear-gradient(to top, transparent 75%, #000 87.5%, #000 100%); }
+.pblur i:nth-child(8) { --b: 32.0px; --m: linear-gradient(to top, transparent 87.5%, #000 100%); }
+.pblur::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(to top, transparent, color-mix(in srgb, var(--bg) 60%, transparent));
+  opacity: 0; transition: opacity .3s;
+}
+.top.scrolled .pblur::after { opacity: 1; }
 
 .head {
   position: absolute; top: 0; left: 0; right: 0;

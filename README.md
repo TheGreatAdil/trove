@@ -166,7 +166,7 @@ While a board is open, its images sit unpacked in a working folder under the app
   | Accent | `#ff4d1a` | `#ff5a2a` |
 
 - **Layout:** a 256px sidebar sits directly on the window surface. The board sits in a single rounded panel (16px radius, 8px inset from the window edge). Cards have a 14px radius, a 14px gap and 36px of side padding.
-- **Quiet chrome:** images fade out under a soft progressive blur at the top of the panel, and slide into a gradual blur under the dock at the bottom (eight stacked backdrop blurs that double in strength towards the edge, with a tint of the panel colour). A thin custom scroll indicator replaces the native scrollbar.
+- **Quiet chrome:** cards slide under the header into a gradual blur (eight stacked backdrop blurs that double in strength towards the top edge, with a tint of the panel colour). A thin custom scroll indicator replaces the native scrollbar.
 - **Motion:** eased with `cubic-bezier(.16, 1, .3, 1)`. The sidebar animates over 0.5s, and the cards resize in the same motion. Animations switch off when the system asks for reduced motion.
 
 ## Ideas taken from each app
