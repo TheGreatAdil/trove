@@ -288,20 +288,22 @@ sthumb.addEventListener('pointerdown', e => {
 /* ───────── grid ───────── */
 const cards = new Map();
 const pos = new Map(); // id -> {x, y, w, h} final layout position inside the grid
-/* Text notes are set on one continuous curve: the shorter the note, the larger,
-   heavier and more condensed the type (Mona Sans' width and weight axes).
-   `t` runs from 0 (a few words) to 1 (a paragraph). */
+/* Notes are cards like the images: a tile with the words set inside, on one
+   continuous curve: the shorter the note, the larger, heavier and more condensed
+   the type (Mona Sans' width and weight axes). `t` runs from 0 (a few words) to
+   1 (a paragraph). */
 const lerp = (a, b, t) => a + (b - a) * t;
 function noteT(text) {
   const len = text.trim().length + (text.trim().split('\n').length - 1) * 18;
   return clamp(Math.log(Math.max(len, 1) / 18) / Math.log(240 / 18), 0, 1);
 }
+const notePad = cw => clamp(cw * .08, 14, 22);
 // `scale` maps t to a font size: [px at t=0, px at t=1]
-function noteStyle(text, cw, scale = [clamp(cw * .136, 20, 50), clamp(cw * .064, 13, 17)]) {
+function noteStyle(text, cw, scale = [clamp(cw * .118, 19, 34), clamp(cw * .064, 13, 15.5)]) {
   const t = noteT(text);
   return {
-    t, fs: lerp(scale[0], scale[1], t), lh: lerp(1.0, 1.5, t),
-    fw: lerp(590, 430, t), wd: lerp(80, 100, t), ls: lerp(-.034, -.004, t),
+    t, fs: lerp(scale[0], scale[1], t), lh: lerp(1.08, 1.45, t),
+    fw: lerp(560, 440, t), wd: lerp(88, 100, t), ls: lerp(-.026, -.003, t), pad: cw ? notePad(cw) : 0,
   };
 }
 function applyNoteStyle(el, s) {
@@ -310,15 +312,20 @@ function applyNoteStyle(el, s) {
   el.style.setProperty('--fw', Math.round(s.fw));
   el.style.setProperty('--wd', s.wd.toFixed(1) + '%');
   el.style.setProperty('--ls', s.ls.toFixed(4) + 'em');
+  if (s.pad) el.style.setProperty('--np', s.pad.toFixed(1) + 'px');
   const note = el.querySelector('.note'); if (note) note.classList.toggle('display', s.t < .4);
 }
+// A short note still makes a proper tile rather than a strip.
+const noteMinH = cw => Math.round(cw * .62);
 // "Words.\n— Source" reads as a quote: the source line is split off.
 function parseNote(text) {
   const m = text.match(/^([\s\S]*?\S)\s*\n\s*[—–]\s*(\S.{0,48})$/);
   return m ? { body: m[1], by: m[2].trim() } : { body: text, by: null };
 }
-function fillNote(note, text) {
-  const { body, by } = parseNote(text);
+// `raw`: the text exactly as typed, for editing.
+function fillNote(note, text, raw = false) {
+  const { body, by } = raw ? { body: text, by: null } : parseNote(text);
+  note.classList.toggle('raw', raw);
   note.classList.toggle('quote', !!by && !/^["“'‘]/.test(body));
   note.querySelector('.note-text').textContent = body;
   let byEl = note.querySelector('.note-by');
@@ -328,41 +335,46 @@ function fillNote(note, text) {
   } else if (byEl) byEl.remove();
   return body;
 }
-// Height of a note at a column width, measured off-screen and cached.
+// Height of a note card at a column width, measured off-screen and cached.
 const noteCache = new Map();
 let measurer = null;
-function measureNote(it, cw, s) {
-  const key = `${it.id}|${cw.toFixed(1)}`;
-  if (noteCache.has(key)) return noteCache.get(key);
-  if (!measurer) {
-    measurer = document.createElement('div'); measurer.className = 'note-measure'; measurer.setAttribute('aria-hidden', 'true');
-    measurer.innerHTML = '<div class="note"><p class="note-text"></p><div class="note-foot"></div></div>';
-    grid.append(measurer);
+function noteHeight(text, cw, s) {
+  const key = `${cw.toFixed(1)}|${text}`;
+  let h = noteCache.get(key);
+  if (h === undefined) {
+    if (!measurer) {
+      measurer = document.createElement('div'); measurer.className = 'note-measure'; measurer.setAttribute('aria-hidden', 'true');
+      measurer.innerHTML = '<div class="note"><p class="note-text"></p></div>';
+      grid.append(measurer);
+    }
+    measurer.style.width = cw + 'px';
+    applyNoteStyle(measurer, s);
+    fillNote(measurer.firstChild, text);
+    h = Math.ceil(measurer.firstChild.getBoundingClientRect().height);
+    if (noteCache.size > 4000) noteCache.clear();
+    noteCache.set(key, h);
   }
-  measurer.style.width = cw + 'px';
-  applyNoteStyle(measurer, s);
-  fillNote(measurer.querySelector('.note'), it.text);
-  const h = Math.ceil(measurer.offsetHeight);
-  noteCache.set(key, h);
-  return h;
+  return Math.max(noteMinH(cw), h);
 }
-const ICON_COPY = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.75"/><path d="M10.5 2.75H4.25a1.5 1.5 0 0 0-1.5 1.5v6.25"/></svg>';
-const ICON_TRASH = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 8.4a1.5 1.5 0 0 0 1.5 1.35h3.3a1.5 1.5 0 0 0 1.5-1.35l.6-8.4"/></svg>';
+const ICON_COPY = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.75"/><path d="M10.5 2.75H4.25a1.5 1.5 0 0 0-1.5 1.5v6.25"/></svg>';
+const ICON_TRASH = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 8.4a1.5 1.5 0 0 0 1.5 1.35h3.3a1.5 1.5 0 0 0 1.5-1.35l.6-8.4"/></svg>';
+const cardActions = what => `<div class="card-actions">
+      <button data-act="copy" aria-label="Copy ${what}" title="Copy">${ICON_COPY}</button>
+      <button data-act="delete" aria-label="Remove ${what}" title="Remove">${ICON_TRASH}</button>
+    </div>`;
+// entrance classes hold the transform via fill-mode; drop them once done
+const settled = el => ev => { if (ev.animationName === 'enter' || ev.animationName === 'ring') el.classList.remove('is-enter', 'is-new'); };
 function makeTextCard(it) {
   const el = document.createElement('figure');
   el.className = 'card is-text'; el.dataset.id = it.id;
   const inner = document.createElement('div'); inner.className = 'card-in';
   const note = document.createElement('div'); note.className = 'note';
   const p = document.createElement('p'); p.className = 'note-text';
-  const foot = document.createElement('div'); foot.className = 'note-foot';
-  foot.innerHTML = `<span class="note-meta"></span><span class="note-actions">
-    <button data-act="copy" aria-label="Copy text" title="Copy">${ICON_COPY}</button>
-    <button data-act="delete" aria-label="Remove note" title="Remove">${ICON_TRASH}</button></span>`;
-  note.append(p, foot); fillNote(note, it.text);
-  inner.append(note); el.append(inner);
-  // the time shows on hover, so keep it fresh then
-  el.addEventListener('mouseenter', () => { foot.querySelector('.note-meta').textContent = ago(it.createdAt); });
-  el.addEventListener('animationend', ev => { if (ev.animationName === 'enter' || ev.animationName === 'settle') el.classList.remove('is-enter', 'is-new'); });
+  note.append(p); fillNote(note, it.text);
+  const ui = document.createElement('div'); ui.className = 'card-ui';
+  ui.innerHTML = cardActions('note');
+  inner.append(note, ui); el.append(inner);
+  el.addEventListener('animationend', settled(el));
   return el;
 }
 
@@ -384,14 +396,10 @@ function makeCard(it) {
   img.src = srcOf(it);
   const ui = document.createElement('div'); ui.className = 'card-ui';
   ui.innerHTML = `<span class="card-meta">${it.w} × ${it.h}</span>
-    <div class="card-actions">
-      <button data-act="copy" aria-label="Copy image" title="Copy"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.75"/><path d="M10.5 2.75H4.25a1.5 1.5 0 0 0-1.5 1.5v6.25"/></svg></button>
-      <button data-act="delete" aria-label="Remove image" title="Remove"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 8.4a1.5 1.5 0 0 0 1.5 1.35h3.3a1.5 1.5 0 0 0 1.5-1.35l.6-8.4"/></svg></button>
-    </div>`;
+    ${cardActions('image')}`;
   inner.append(img, ui);
   el.append(inner);
-  // entrance classes hold the transform via fill-mode; drop them once done
-  el.addEventListener('animationend', ev => { if (ev.animationName === 'enter' || ev.animationName === 'ring') el.classList.remove('is-enter', 'is-new'); });
+  el.addEventListener('animationend', settled(el));
   return el;
 }
 
@@ -433,14 +441,20 @@ function layout({ animate = false, width, order, recount = false } = {}) {
   const unplaced = [];
   for (const it of items) {
     const el = cards.get(it.id); if (!el) continue;
+    // The note being edited is measured as it stands; the others come from the cache.
     let h;
-    if (isText(it)) { const s = noteStyle(parseNote(it.text).body, cw); applyNoteStyle(el, s); h = measureNote(it, cw, s); }
-    else h = Math.round(cw * it.h / it.w);
+    el.style.width = cw + 'px';
+    if (editing && editing.it === it) {
+      applyNoteStyle(el, noteStyle(it.text, cw));
+      h = Math.max(noteMinH(cw), el.querySelector('.note').offsetHeight);
+    } else if (isText(it)) {
+      const s = noteStyle(parseNote(it.text).body, cw); applyNoteStyle(el, s); h = noteHeight(it.text, cw, s);
+    } else h = Math.round(cw * it.h / it.w);
     let c = 0; for (let k = 1; k < cols; k++) if (hs[k] < hs[c] - 1) c = k;
     const x = Math.round(c * (cw + gap)), y = hs[c];
     pos.set(it.id, { x, y, w: cw, h });
     if (!el.dataset.placed) { el.style.transition = 'none'; unplaced.push(el); el.dataset.placed = '1'; }
-    el.style.width = cw + 'px'; el.style.height = h + 'px';
+    el.style.height = h + 'px';
     el.style.transform = `translate3d(${x}px, ${y}px, 0)`;
     hs[c] += h + gap;
   }
@@ -473,7 +487,70 @@ grid.addEventListener('click', e => {
   const act = e.target.closest('[data-act]');
   const it = byId(card.dataset.id); if (!it) return;
   if (act) { e.stopPropagation(); if (act.dataset.act === 'delete') removeItem(it); else copyItem(it); return; }
-  openFocus(it.id);
+  if (isText(it)) startEdit(it, { x: e.clientX, y: e.clientY });
+  else openFocus(it.id);
+});
+
+/* ───────── editing a note in place ───────── */
+let editing = null; // { it, card, p, before }
+function caretAt(x, y) {
+  if (document.caretPositionFromPoint) { const c = document.caretPositionFromPoint(x, y); return c && { node: c.offsetNode, offset: c.offset }; }
+  if (document.caretRangeFromPoint) { const r = document.caretRangeFromPoint(x, y); return r && { node: r.startContainer, offset: r.startOffset }; }
+  return null;
+}
+// `at`: the click point, so the caret lands where you clicked. Otherwise it goes to the end.
+function startEdit(it, at) {
+  if (editing && editing.it === it) return;
+  endEdit();
+  const card = cards.get(it.id); if (!card) return;
+  const note = card.querySelector('.note'), p = note.querySelector('.note-text');
+  // A quote's body is the start of its text, so an offset into it carries over.
+  let offset = it.text.length;
+  if (at) { const c = caretAt(at.x, at.y); if (c && c.node.parentNode === p) offset = c.offset; }
+  fillNote(note, it.text, true);
+  p.contentEditable = 'plaintext-only'; p.spellcheck = false;
+  card.classList.add('editing');
+  editing = { it, card, p, before: it.text };
+  layout({ animate: true });
+  p.focus({ preventScroll: true });
+  const node = p.firstChild || p;
+  const r = document.createRange(); r.setStart(node, Math.min(offset, node.nodeType === 3 ? node.length : 0));
+  const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+}
+// Keeps what was typed. Emptying a note removes it, and Undo brings back the old text.
+function endEdit() {
+  const ed = editing; if (!ed) return;
+  editing = null;
+  const { it, card, p } = ed;
+  p.removeAttribute('contenteditable'); card.classList.remove('editing');
+  const sel = getSelection(); if (sel.anchorNode && p.contains(sel.anchorNode)) sel.removeAllRanges();
+  const text = it.text.replace(/^\s*\n/, '').replace(/\s+$/, '');
+  if (!text.trim()) { it.text = ed.before; removeItem(it); return; }
+  if (text !== it.text) { it.text = text; touch(); }
+  fillNote(card.querySelector('.note'), it.text);
+  layout({ animate: true });
+}
+function editNote(it) {
+  const el = cards.get(it.id); if (!el) return;
+  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  startEdit(it);
+}
+grid.addEventListener('input', e => {
+  const ed = editing; if (!ed || e.target !== ed.p) return;
+  ed.it.text = ed.p.innerText;
+  const wasDirty = project.dirty;
+  touch();
+  if (!wasDirty) renderSidebar(); // the row's unsaved dot
+  layout({ animate: true });
+});
+grid.addEventListener('keydown', e => {
+  if (!editing || e.target !== editing.p) return;
+  if ((e.key === 'Enter' && !e.shiftKey && !e.isComposing) || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); editing.p.blur(); }
+});
+grid.addEventListener('focusout', e => {
+  if (!editing || e.target !== editing.p) return;
+  if (!document.hasFocus()) return; // the window lost focus: carry on when it comes back
+  endEdit();
 });
 grid.addEventListener('mouseover', e => { const c = e.target.closest('.card'); state.hovered = c ? c.dataset.id : null; });
 grid.addEventListener('mouseleave', () => { state.hovered = null; });
@@ -482,7 +559,7 @@ grid.addEventListener('mouseleave', () => { state.hovered = null; });
 let drag = null;
 grid.addEventListener('pointerdown', e => {
   if (e.button !== 0 || drag) return;
-  const card = e.target.closest('.card'); if (!card || e.target.closest('[data-act]')) return;
+  const card = e.target.closest('.card'); if (!card || e.target.closest('[data-act]') || card.classList.contains('editing')) return;
   const it = byId(card.dataset.id); if (!it) return;
   drag = { it, card, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, pid: e.pointerId, active: false };
 });
@@ -509,7 +586,7 @@ function startDrag() {
   gin.style.transformOrigin = `${d.offX}px ${d.offY}px`; // lift and shrink around the grab point
   if (isText(d.it)) {
     gin.classList.add('is-text');
-    for (const v of ['--fs', '--lh', '--fw', '--wd', '--ls']) gin.style.setProperty(v, d.card.style.getPropertyValue(v));
+    for (const v of ['--fs', '--lh', '--fw', '--wd', '--ls', '--np']) gin.style.setProperty(v, d.card.style.getPropertyValue(v));
     gin.append(d.card.querySelector('.note').cloneNode(true));
   } else {
     gin.style.background = d.it.color || 'var(--card)';
@@ -738,11 +815,11 @@ function commit(newItems, { linked = false } = {}) {
 document.addEventListener('paste', e => {
   if (modal.classList.contains('open')) return;
   const t = e.target;
-  const editing = t instanceof Element && t.closest('input, textarea, [contenteditable="true"]');
+  const inField = t instanceof Element && t.closest('input, textarea, [contenteditable]');
   const dt = e.clipboardData; if (!dt) return;
   const files = [...dt.items].filter(i => i.kind === 'file' && i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
-  if (files.length) { e.preventDefault(); if (editing) t.blur(); addFiles(files); return; }
-  if (editing) {
+  if (files.length) { e.preventDefault(); if (inField) t.blur(); addFiles(files); return; }
+  if (inField) {
     if (t === titleEl) { e.preventDefault(); document.execCommand('insertText', false, dt.getData('text/plain').replace(/\s+/g, ' ')); }
     return;
   }
@@ -970,18 +1047,27 @@ function showFocus() {
   const note = $('#focusNote');
   $('#focusBoard').textContent = activeBoard().name;
   $('#focusPos').textContent = `${focusIdx + 1} / ${list.length}`;
+  $('#focusEdit').hidden = !isText(it);
   if (isText(it)) {
+    // The card itself, enlarged: wider for long notes so they keep a reading measure.
     focusImg.style.display = 'none';
-    const s = noteStyle(parseNote(it.text).body, 0, [80, 21]);
+    const s = noteStyle(parseNote(it.text).body, 0, [60, 19]);
     applyNoteStyle(note, s);
-    note.classList.toggle('long', s.t > .75);
-    fillNote(note.querySelector('.note'), it.text);
+    note.style.setProperty('--np', lerp(52, 44, s.t).toFixed(1) + 'px');
+    note.style.setProperty('--card-w', Math.round(lerp(560, 700, s.t)) + 'px');
+    const card = note.querySelector('.note');
+    fillNote(card, it.text);
+    card.style.width = '';
     note.classList.add('on'); note.scrollTop = 0;
-    // Balanced lines end short of the box; shrink it to the longest line so the block truly centres.
-    const p = note.querySelector('.note-text'); p.style.width = '';
-    const range = document.createRange(); range.selectNodeContents(p);
-    const w = Math.max(0, ...[...range.getClientRects()].map(r => r.width));
-    if (w) p.style.width = Math.ceil(w + 1) + 'px';
+    // Balanced lines end short of the card: shrink it to the longest line so it fits the words.
+    const k = card.offsetWidth / (card.getBoundingClientRect().width || 1); // undo the entrance scale
+    let longest = 0;
+    for (const el of card.children) {
+      const r = document.createRange(); r.selectNodeContents(el);
+      for (const rect of r.getClientRects()) longest = Math.max(longest, rect.width * k);
+    }
+    const pad = parseFloat(note.style.getPropertyValue('--np'));
+    if (longest) card.style.width = Math.ceil(Math.max(360, longest + pad * 2 + 2)) + 'px';
     $('#focusMeta').textContent = `Note · Added ${ago(it.createdAt)}`;
     return;
   }
@@ -1057,6 +1143,7 @@ function manifest() {
 
 // Swaps in a board returned by project_new / project_open.
 function loadProject({ dir, manifest: m }, path) {
+  endEdit();
   const previous = project.path, now = Date.now();
   Object.assign(project, {
     path, dir, sep: dir.includes('\\') ? '\\' : '/', dirty: false, rev: 0,
@@ -1208,6 +1295,7 @@ document.addEventListener('click', e => {
   else if (act === 'close-focus') closeFocus();
   else if (act === 'focus-prev') stepFocus(-1);
   else if (act === 'focus-next') stepFocus(1);
+  else if (act === 'focus-edit') { const it = boardItems()[focusIdx]; closeFocus(); if (it && isText(it)) editNote(it); }
   else if (act === 'focus-copy') copyItem(boardItems()[focusIdx]);
   else if (act === 'focus-delete') removeItem(boardItems()[focusIdx]);
 });
@@ -1256,7 +1344,7 @@ function toggleTheme() {
 
 document.addEventListener('keydown', e => {
   const mod = isMac ? e.metaKey : e.ctrlKey;
-  const typing = e.target instanceof Element && e.target.closest('input, textarea, [contenteditable="true"]');
+  const typing = e.target instanceof Element && e.target.closest('input, textarea, [contenteditable]');
   const k = (e.key || '').toLowerCase(); // autofill can send keydowns without a key
   if (modal.classList.contains('open')) {
     if (e.key === 'Escape') { e.preventDefault(); modalDone && modalDone(); }
@@ -1295,6 +1383,7 @@ document.addEventListener('keydown', e => {
     const it = byId(state.hovered);
     if (!it) return;
     if (e.key === ' ') { e.preventDefault(); openFocus(it.id); }
+    if (e.key === 'Enter' && isText(it)) { e.preventDefault(); startEdit(it); }
     if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); removeItem(it); state.hovered = null; }
     if (mod && e.key.toLowerCase() === 'c') { e.preventDefault(); copyItem(it); }
   }

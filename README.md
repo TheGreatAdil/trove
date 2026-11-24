@@ -71,12 +71,13 @@ Recommended editor setup: [VS Code](https://code.visualstudio.com/) with the [Ta
 
 **Notes**
 - The dock at the bottom of the board is a composer. Type into it, or just start typing anywhere on the board, and press Enter: the note lands on the board as a text card. Shift+Enter adds a line, Esc closes it.
-- Notes are set as type: a hairline rule and the words. A few words are set large and condensed, and a paragraph reads as body text. Size, weight, width and line spacing follow one continuous curve over the note's length (Mona Sans' variable axes), and scale with the column width like the images do.
-- Each note card is exactly as tall as its text, so nothing is cut off.
+- A note is a card like an image: a warm paper tile with the words set inside. A few words are set large and condensed, and a paragraph reads as body text. Size, weight, width and line spacing follow one continuous curve over the note's length (Mona Sans' variable axes), and scale with the column width like the images do.
+- Each note card is tall enough for all of its text, so nothing is cut off. A short note keeps a tile shape.
+- Click a note to edit it in place. The card lifts while you type and grows to fit. Enter or Esc finishes, Shift+Enter adds a line. Emptying a note removes it, and Undo brings it back.
 - While you type, the composer previews the note on the same curve.
 - A note whose last line starts with "—" reads as a quote: the opening quotation mark hangs into the margin and the source sits small underneath.
 - A link typed into the composer is added as an image if it is one, and as a note if not.
-- Hover a note for a tab on its rule showing when it was written, with Copy and Remove. Click it to read it large in focus view.
+- Hover a note for Copy and Remove in its corner. Space opens it large in focus view, which also has Edit.
 
 **Organizing**
 - Drag cards to reorder them.
@@ -110,6 +111,7 @@ On macOS, Cmd replaces Ctrl.
 | `Ctrl =` / `Ctrl -` | Bigger / smaller thumbnails |
 | `Ctrl Z` | Restore the last removed card |
 | `Space` | Open the hovered card in focus view (`Space` or `Esc` closes it) |
+| `Enter` | Edit the hovered note (`Enter` or `Esc` finishes) |
 | `←` / `→` | Previous / next card in focus view |
 | `Delete` | Remove the hovered or focused card |
 | `Ctrl C` | Copy the hovered image or note |

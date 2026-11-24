@@ -41,6 +41,8 @@
   --hover: rgba(20, 20, 19, .045);
   --surface: #ffffff;
   --card: #eeece7;
+  --note: #f3eee4;
+  --note-hover: #ece6da;
   --accent: #ff4d1a;
   --panel-shadow: 0 0 0 1px rgba(20, 20, 19, .055), 0 1px 2px rgba(20, 20, 19, .04), 0 16px 48px -28px rgba(20, 20, 19, .2);
   --pill-shadow: 0 0 0 1px rgba(20, 20, 19, .06), 0 1px 2px rgba(20, 20, 19, .07);
@@ -63,6 +65,8 @@
   --hover: rgba(237, 236, 231, .05);
   --surface: #1f1f1d;
   --card: #1e1e1c;
+  --note: #211f1c;
+  --note-hover: #282622;
   --accent: #ff5a2a;
   --panel-shadow: 0 0 0 1px rgba(237, 236, 231, .06), 0 16px 48px -28px rgba(0, 0, 0, .8);
   --pill-shadow: 0 0 0 1px rgba(237, 236, 231, .07), 0 1px 2px rgba(0, 0, 0, .4);
@@ -407,46 +411,38 @@ body.dragging .board-link .more { opacity: 0 !important; }
 .card-actions button:active { transform: scale(.92); }
 
 /* ───────── Text cards ─────────
-   Set as type, not as sticky notes: a hairline rule, the words, a small foot.
-   Size follows length (short notes go large and condensed) and scales with
-   the column width, like the images do. The card is as tall as its text. */
-.card.is-text { cursor: zoom-in; }
-.card.is-text .card-in { background: none; border-radius: 0; overflow: visible; }
-.note { position: relative; padding: 13px 0 4px; }
-.note::before {
-  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
-  background: var(--ink); transform-origin: 0 50%;
-  transition: background .2s;
-}
-.card.is-text:hover .note::before { background: var(--accent); }
+   A note is a card like any image: a tile of its own with the words set inside.
+   Short notes go large, long ones read as body text, and the card is always
+   tall enough for every word. Click one to edit it in place. */
+.card.is-text { cursor: text; }
+.card.is-text .card-in { background: var(--note); }
+.card.is-text:hover .card-in { background: var(--note-hover); }
+.note { position: relative; padding: var(--np, 16px); }
 .note-text {
-  margin: 0;
+  margin: 0; outline: 0;
   font-size: var(--fs, 15px); line-height: var(--lh, 1.4); font-weight: var(--fw, 440);
   font-stretch: var(--wd, 100%); letter-spacing: var(--ls, 0);
   white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: pretty;
 }
 .note.display .note-text { text-wrap: balance; }
-/* Quotes: the opening mark hangs into the gutter, the source sits quietly below */
+.note.raw .note-text { text-wrap: wrap; } /* while editing, lines must not re-balance under the caret */
+/* Quotes: the opening mark hangs into the margin, the source sits quietly below */
 .note.quote .note-text::before { content: '\201C'; position: absolute; transform: translateX(-100%); }
-.note-by { margin: 10px 0 0; font-size: 12px; font-weight: 520; color: var(--ink-2); font-stretch: 100%; }
-/* On hover a small tab sits on the rule: when it was written, copy, remove */
-.note-foot {
-  position: absolute; top: -11px; right: 0;
-  display: flex; align-items: center; gap: 6px;
-  height: 22px; padding-left: 8px; background: var(--bg);
-  font-size: 11px; font-weight: 520; color: var(--ink-3); font-variant-numeric: tabular-nums;
-  opacity: 0; transition: opacity .2s, background .3s;
+.note-by { margin: 12px 0 0; font-size: 12px; font-weight: 520; color: var(--ink-2); }
+/* The buttons sit bottom-right, where a short note leaves room; on a long note
+   the words fade out beneath them instead of being covered. */
+.card.is-text .card-actions { top: auto; bottom: 10px; transform: translateY(4px); }
+.card.is-text .card-ui::before {
+  content: ''; position: absolute; right: 0; bottom: 0; width: 132px; height: 66px;
+  background: radial-gradient(farthest-side at 100% 100%, var(--note-hover) 52%, transparent);
+  opacity: 0; transition: opacity .2s;
 }
-.card.is-text:hover .note-foot { opacity: 1; }
-.note-actions { display: flex; gap: 2px; }
-.note-actions button { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--ink-2); }
-.note-actions button:hover { background: var(--hover); color: var(--ink); }
-/* A new note is typeset: the rule draws in, then the words settle */
-.card.is-text.is-new .card-in { animation: none; }
-.card.is-text.is-new .note::before { animation: rule .7s var(--ease-out) both; }
-.card.is-text.is-new .note-text, .card.is-text.is-new .note-by { animation: settle .7s var(--ease-out) .12s both; }
-@keyframes rule { from { transform: scaleX(0); } }
-@keyframes settle { from { opacity: 0; transform: translateY(6px); } }
+.card.is-text:hover .card-ui::before { opacity: 1; }
+/* Editing: the card lifts off the board onto the surface colour */
+.card.is-text.editing { z-index: 2; }
+.card.is-text.editing .card-in { background: var(--surface); box-shadow: var(--lift); overflow: visible; }
+.card.is-text.editing .note-text { user-select: text; -webkit-user-select: text; caret-color: var(--accent); }
+.card.is-text.editing .card-ui { display: none; }
 .note-measure { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; }
 
 /* dragging: the picked-up card leaves a soft slot behind */
@@ -466,8 +462,7 @@ body.dragging .card:hover img.loaded { transform: none; filter: none; }
 .ghost.up .ghost-in { transform: scale(1.045); box-shadow: var(--lift); }
 .ghost.over-board .ghost-in { transform: scale(.3); border-radius: 36px; }
 .ghost-in img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.ghost-in.is-text { background: var(--bg) !important; left: -12px; right: -12px; bottom: auto; padding: 0 12px 2px; overflow: visible; }
-.ghost-in.is-text .note-actions { display: none; }
+.ghost-in.is-text { background: var(--note); }
 .card.ghosted .note { opacity: 0; }
 
 /* ───────── Empty ───────── */
@@ -679,18 +674,19 @@ body.dragging .card:hover img.loaded { transform: none; filter: none; }
   transition: transform .45s var(--ease-out), opacity .3s;
 }
 .focus.open .focus-stage img.loaded { transform: none; opacity: 1; }
+/* A note in focus view is the card itself, enlarged */
 .focus-note {
   position: absolute; inset: 0 72px; display: none; overflow-y: auto; scrollbar-width: none;
-  opacity: 0; transform: translateY(8px); transition: opacity .3s, transform .45s var(--ease-out);
+  opacity: 0; transform: translateY(8px) scale(.985); transition: opacity .3s, transform .45s var(--ease-out);
 }
+.focus-note::-webkit-scrollbar { display: none; }
 .focus-note.on { display: grid; }
 .focus.open .focus-note.on { opacity: 1; transform: none; }
-.focus-note .note { margin: auto; padding: 40px 0; color: #ecebe6; }
-.focus-note .note::before { display: none; }
-/* widths in em of the note's own size: ~14 words a line for short notes, a book measure for long ones */
-.focus-note .note-text { max-width: 13em; text-wrap: balance; }
-.focus-note .note-by { margin-top: 1.4em; font-size: 15px; color: rgba(236, 235, 230, .6); }
-.focus-note.long .note-text { max-width: 34em; text-wrap: pretty; }
+.focus-note .note {
+  margin: auto; width: min(100%, var(--card-w, 640px)); max-width: 100%;
+  border-radius: 20px; background: var(--note); color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line-2), 0 40px 90px -40px rgba(0, 0, 0, .7);
+}
 .focus .icon-btn { color: rgba(236, 235, 230, .7); border-radius: 999px; }
 .focus .icon-btn:hover { background: rgba(236, 235, 230, .08); color: #fff; }
 .focus-nav {
@@ -707,23 +703,7 @@ body.dragging .card:hover img.loaded { transform: none; filter: none; }
   display: flex; align-items: center; gap: 7px; color: rgba(236, 235, 230, .8);
 }
 .focus-bot .actions button:hover { background: rgba(236, 235, 230, .08); color: #fff; }
-.focus .icon-btn { color: rgba(236, 235, 230, .7); border-radius: 999px; }
-.focus .icon-btn:hover { background: rgba(236, 235, 230, .08); color: #fff; }
-.focus-nav {
-  position: absolute; top: 0; bottom: 0; width: 72px;
-  display: grid; place-items: center;
-  color: rgba(236, 235, 230, .45);
-  transition: color .15s;
-}
-.focus-nav:hover { color: #fff; }
-.focus-nav.prev { left: 0; } .focus-nav.next { right: 0; }
-.focus-bot .actions { display: flex; gap: 4px; }
-.focus-bot .actions button {
-  height: 30px; padding: 0 12px; border-radius: 999px;
-  display: flex; align-items: center; gap: 7px; color: rgba(236, 235, 230, .8);
-}
-.focus-bot .actions button:hover { background: rgba(236, 235, 230, .08); color: #fff; }
-
+.focus-bot .actions button[hidden] { display: none; }
 /* ───────── Small windows ───────── */
 .scrim { position: fixed; inset: 0; z-index: 4; background: rgba(0, 0, 0, .2); opacity: 0; pointer-events: none; transition: opacity .3s; }
 .app.narrow .stage { left: var(--inset); }
