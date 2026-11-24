@@ -97,18 +97,25 @@
           <span class="key key-v" id="keyV"><span class="lbl">V</span></span>
         </div>
         <h2>Paste anything.</h2>
-        <p>Copy an image, a screenshot or a link to one, and it lands on this board. Dropping files works too.</p>
+        <p>Copy an image, a screenshot or a link to one, and it lands on this board. Or just start typing.</p>
         <button class="add-link" data-action="pick-files">Or choose files</button>
       </div>
     </div>
 
+    <div class="dock-wrap">
+    <div class="toast" id="toast" role="status"><span class="toast-thumb" id="toastThumb"></span><span id="toastText"></span><button id="toastBtn" hidden></button></div>
+
     <div class="dock" id="dock">
-      <div class="dock-msg"><span class="dock-thumb" id="dockThumb"></span><span id="dockText">Paste an image or link</span><span class="kbd" id="dockKbd" data-kbd="V"></span></div>
-      <span class="dock-sep"></span>
-      <button class="dock-btn" id="dockBtn" data-action="pick-files">
-        <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 1.5v9M1.5 6h9"/></svg>
-        <span>Add</span>
-      </button>
+      <div class="dock-head"><span>New note in <b id="dockBoard"></b></span><span>↵ add<i>⇧↵ new line</i><i>esc close</i></span></div>
+      <div class="dock-row">
+        <textarea class="composer" id="composer" rows="1" placeholder="Paste an image, or write a note" aria-label="Write a note"></textarea>
+        <span class="kbd" data-kbd="V"></span>
+        <button class="dock-btn" id="dockBtn" data-action="dock-add">
+          <svg class="plus" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 1.5v9M1.5 6h9"/></svg>
+          <span id="dockLabel">Add</span>
+        </button>
+      </div>
+    </div>
     </div>
 
     <div class="drop" id="drop"><div class="drop-copy"><strong>Drop to add</strong><span id="dropTo"></span></div></div>
@@ -127,6 +134,7 @@
   <div class="focus-stage">
     <button class="focus-nav prev" data-action="focus-prev" aria-label="Previous"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m12.5 4-6 6 6 6"/></svg></button>
     <img id="focusImg" alt="">
+    <div class="focus-note" id="focusNote"><div class="note"><p class="note-text"></p></div></div>
     <button class="focus-nav next" data-action="focus-next" aria-label="Next"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"/></svg></button>
   </div>
   <div class="focus-bot">

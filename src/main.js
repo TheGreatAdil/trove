@@ -65,7 +65,8 @@ function srcOf(it) {
   if (!urls.has(it.id)) urls.set(it.id, convertFileSrc([project.dir, 'images', it.file].join(project.sep)));
   return urls.get(it.id);
 }
-const thumbOf = srcOf;
+const isText = it => it.kind === 'text';
+const thumbOf = it => isText(it) ? null : srcOf(it);
 const sortKey = it => it.pos ?? it.createdAt; // manual order wins once a card has been dragged
 const byId = id => state.items.find(i => i.id === id);
 const boardItems = () => [...state.items].sort((a, b) => sortKey(b) - sortKey(a));
@@ -76,7 +77,8 @@ const app = $('#app'), stage = $('#stage'), grid = $('#grid'), scroll = $('#scro
 const topEl = $('#top'), head = $('#head'), titleRow = $('#titleRow'), metaEl = $('#meta'), toolsEl = $('#tools');
 const titleEl = $('#title'), countEl = $('#count'), updatedEl = $('#updated');
 const emptyEl = $('#empty'), dock = $('#dock');
-const dockText = $('#dockText'), dockKbd = $('#dockKbd'), dockThumb = $('#dockThumb'), dockBtn = $('#dockBtn');
+const composer = $('#composer'), dockLabel = $('#dockLabel');
+const toastEl = $('#toast'), toastText = $('#toastText'), toastThumb = $('#toastThumb'), toastBtn = $('#toastBtn');
 const drop = $('#drop'), menu = $('#menu'), focus = $('#focus'), focusImg = $('#focusImg');
 const densityEl = $('#density'), searchEl = $('#search'), filePick = $('#filePick');
 const sbar = $('#sbar'), sthumb = $('#sthumb');
@@ -286,7 +288,86 @@ sthumb.addEventListener('pointerdown', e => {
 /* ───────── grid ───────── */
 const cards = new Map();
 const pos = new Map(); // id -> {x, y, w, h} final layout position inside the grid
+/* Text notes are set on one continuous curve: the shorter the note, the larger,
+   heavier and more condensed the type (Mona Sans' width and weight axes).
+   `t` runs from 0 (a few words) to 1 (a paragraph). */
+const lerp = (a, b, t) => a + (b - a) * t;
+function noteT(text) {
+  const len = text.trim().length + (text.trim().split('\n').length - 1) * 18;
+  return clamp(Math.log(Math.max(len, 1) / 18) / Math.log(240 / 18), 0, 1);
+}
+// `scale` maps t to a font size: [px at t=0, px at t=1]
+function noteStyle(text, cw, scale = [clamp(cw * .136, 20, 50), clamp(cw * .064, 13, 17)]) {
+  const t = noteT(text);
+  return {
+    t, fs: lerp(scale[0], scale[1], t), lh: lerp(1.0, 1.5, t),
+    fw: lerp(590, 430, t), wd: lerp(80, 100, t), ls: lerp(-.034, -.004, t),
+  };
+}
+function applyNoteStyle(el, s) {
+  el.style.setProperty('--fs', s.fs.toFixed(2) + 'px');
+  el.style.setProperty('--lh', s.lh.toFixed(3));
+  el.style.setProperty('--fw', Math.round(s.fw));
+  el.style.setProperty('--wd', s.wd.toFixed(1) + '%');
+  el.style.setProperty('--ls', s.ls.toFixed(4) + 'em');
+  const note = el.querySelector('.note'); if (note) note.classList.toggle('display', s.t < .4);
+}
+// "Words.\n— Source" reads as a quote: the source line is split off.
+function parseNote(text) {
+  const m = text.match(/^([\s\S]*?\S)\s*\n\s*[—–]\s*(\S.{0,48})$/);
+  return m ? { body: m[1], by: m[2].trim() } : { body: text, by: null };
+}
+function fillNote(note, text) {
+  const { body, by } = parseNote(text);
+  note.classList.toggle('quote', !!by && !/^["“'‘]/.test(body));
+  note.querySelector('.note-text').textContent = body;
+  let byEl = note.querySelector('.note-by');
+  if (by) {
+    if (!byEl) { byEl = document.createElement('p'); byEl.className = 'note-by'; note.querySelector('.note-text').after(byEl); }
+    byEl.textContent = `— ${by}`;
+  } else if (byEl) byEl.remove();
+  return body;
+}
+// Height of a note at a column width, measured off-screen and cached.
+const noteCache = new Map();
+let measurer = null;
+function measureNote(it, cw, s) {
+  const key = `${it.id}|${cw.toFixed(1)}`;
+  if (noteCache.has(key)) return noteCache.get(key);
+  if (!measurer) {
+    measurer = document.createElement('div'); measurer.className = 'note-measure'; measurer.setAttribute('aria-hidden', 'true');
+    measurer.innerHTML = '<div class="note"><p class="note-text"></p><div class="note-foot"></div></div>';
+    grid.append(measurer);
+  }
+  measurer.style.width = cw + 'px';
+  applyNoteStyle(measurer, s);
+  fillNote(measurer.querySelector('.note'), it.text);
+  const h = Math.ceil(measurer.offsetHeight);
+  noteCache.set(key, h);
+  return h;
+}
+const ICON_COPY = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.75"/><path d="M10.5 2.75H4.25a1.5 1.5 0 0 0-1.5 1.5v6.25"/></svg>';
+const ICON_TRASH = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 8.4a1.5 1.5 0 0 0 1.5 1.35h3.3a1.5 1.5 0 0 0 1.5-1.35l.6-8.4"/></svg>';
+function makeTextCard(it) {
+  const el = document.createElement('figure');
+  el.className = 'card is-text'; el.dataset.id = it.id;
+  const inner = document.createElement('div'); inner.className = 'card-in';
+  const note = document.createElement('div'); note.className = 'note';
+  const p = document.createElement('p'); p.className = 'note-text';
+  const foot = document.createElement('div'); foot.className = 'note-foot';
+  foot.innerHTML = `<span class="note-meta"></span><span class="note-actions">
+    <button data-act="copy" aria-label="Copy text" title="Copy">${ICON_COPY}</button>
+    <button data-act="delete" aria-label="Remove note" title="Remove">${ICON_TRASH}</button></span>`;
+  note.append(p, foot); fillNote(note, it.text);
+  inner.append(note); el.append(inner);
+  // the time shows on hover, so keep it fresh then
+  el.addEventListener('mouseenter', () => { foot.querySelector('.note-meta').textContent = ago(it.createdAt); });
+  el.addEventListener('animationend', ev => { if (ev.animationName === 'enter' || ev.animationName === 'settle') el.classList.remove('is-enter', 'is-new'); });
+  return el;
+}
+
 function makeCard(it) {
+  if (isText(it)) return makeTextCard(it);
   const el = document.createElement('figure');
   el.className = 'card'; el.dataset.id = it.id;
   const inner = document.createElement('div'); inner.className = 'card-in';
@@ -327,9 +408,7 @@ function renderGrid({ entrance = false, fresh = new Set(), animate = false, reco
   });
   layout({ animate, recount });
   schedulePalette();
-  const isEmpty = items.length === 0;
-  emptyEl.classList.toggle('on', isEmpty);
-  dock.classList.toggle('hidden', isEmpty);
+  emptyEl.classList.toggle('on', items.length === 0);
 }
 
 function clearGrid() { for (const el of cards.values()) el.remove(); cards.clear(); pos.clear(); }
@@ -354,7 +433,9 @@ function layout({ animate = false, width, order, recount = false } = {}) {
   const unplaced = [];
   for (const it of items) {
     const el = cards.get(it.id); if (!el) continue;
-    const h = Math.round(cw * it.h / it.w);
+    let h;
+    if (isText(it)) { const s = noteStyle(parseNote(it.text).body, cw); applyNoteStyle(el, s); h = measureNote(it, cw, s); }
+    else h = Math.round(cw * it.h / it.w);
     let c = 0; for (let k = 1; k < cols; k++) if (hs[k] < hs[c] - 1) c = k;
     const x = Math.round(c * (cw + gap)), y = hs[c];
     pos.set(it.id, { x, y, w: cw, h });
@@ -377,7 +458,7 @@ const keyMod = $('#keyMod'), keyV = $('#keyV');
 document.addEventListener('keydown', e => {
   if (!emptyEl.classList.contains('on')) return;
   if (e.key === 'Control' || e.key === 'Meta') keyMod.classList.add('down');
-  if (e.key.toLowerCase() === 'v') keyV.classList.add('down');
+  if (e.key.toLowerCase() === 'v' && (e.ctrlKey || e.metaKey)) keyV.classList.add('down');
 });
 document.addEventListener('keyup', e => {
   if (e.key === 'Control' || e.key === 'Meta') keyMod.classList.remove('down');
@@ -425,9 +506,15 @@ function startDrag() {
   g.style.transform = `translate3d(${r.left}px, ${r.top}px, 0)`;
   g.innerHTML = '<div class="ghost-tilt"><div class="ghost-in"></div></div>';
   const gin = g.querySelector('.ghost-in');
-  gin.style.background = d.it.color || 'var(--card)';
   gin.style.transformOrigin = `${d.offX}px ${d.offY}px`; // lift and shrink around the grab point
-  const im = new Image(); im.alt = ''; im.draggable = false; im.src = srcOf(d.it); gin.append(im);
+  if (isText(d.it)) {
+    gin.classList.add('is-text');
+    for (const v of ['--fs', '--lh', '--fw', '--wd', '--ls']) gin.style.setProperty(v, d.card.style.getPropertyValue(v));
+    gin.append(d.card.querySelector('.note').cloneNode(true));
+  } else {
+    gin.style.background = d.it.color || 'var(--card)';
+    const im = new Image(); im.alt = ''; im.draggable = false; im.src = srcOf(d.it); gin.append(im);
+  }
   document.body.append(g);
   d.ghost = g; d.tilt = g.firstChild;
   requestAnimationFrame(() => g.classList.add('up'));
@@ -616,7 +703,8 @@ async function addFiles(files) {
   if (out.length) commit(out);
   else toast(typeof failed === 'string' ? failed : 'That file isn’t an image Trove can read');
 }
-async function addUrl(url) {
+// `orNote`: a link typed into the composer becomes a note if it isn't an image.
+async function addUrl(url, { orNote = false } = {}) {
   try {
     const r = await fetch(url, { mode: 'cors' });
     const blob = await r.blob();
@@ -626,9 +714,13 @@ async function addUrl(url) {
     const img = new Image();
     // The site blocks downloads, so keep it as a link. It needs a connection to show.
     img.onload = () => commit([{ id: uid(), src: url, w: img.naturalWidth, h: img.naturalHeight, color: null, cors: false, createdAt: Date.now(), source: url }], { linked: true });
-    img.onerror = () => toast('Couldn’t find an image at that link');
+    img.onerror = () => orNote ? addNote(url) : toast('Couldn’t find an image at that link');
     img.src = url;
   }
+}
+// Notes are typed into the composer; they're stored in the board's project.json.
+function addNote(text) {
+  commit([{ id: uid(), kind: 'text', text, createdAt: Date.now() }]);
 }
 function commit(newItems, { linked = false } = {}) {
   const b = activeBoard(); const now = Date.now();
@@ -689,7 +781,7 @@ function removeItem(it) {
   undo.push(it); // its file stays in the session folder, so undo can bring it back
   if (focus.classList.contains('open')) { const list = boardItems(); if (!list.length) closeFocus(); else { focusIdx = Math.min(focusIdx, list.length - 1); showFocus(); } }
   renderGrid({ animate: true }); renderHead(); renderSidebar();
-  toast('Image removed', { action: 'Undo', onAction: restore });
+  toast(isText(it) ? 'Note removed' : 'Image removed', { action: 'Undo', onAction: restore });
 }
 function restore() {
   const it = undo.pop(); if (!it) return;
@@ -716,40 +808,64 @@ async function toPng(it) {
   return new Promise(r => c.toBlob(r, 'image/png'));
 }
 async function copyItem(it) {
+  if (isText(it)) {
+    try { await navigator.clipboard.writeText(it.text); toast('Copied the note'); } catch { toast('Couldn’t copy this note'); }
+    return;
+  }
   try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': toPng(it) })]); toast('Copied to clipboard', { thumb: thumbOf(it) }); }
   catch { toast('Couldn’t copy this image'); }
 }
 
-/* ───────── dock / toast ───────── */
-let toastTimer = null, toastAction = null;
+/* ───────── composer ───────── */
+// Grows with its text (up to ~8 lines), widens while in use.
+// While you type, the text is set on the same curve as the card it will become.
+function sizeComposer() {
+  const has = composer.value.trim().length > 0;
+  if (has) applyNoteStyle(composer, noteStyle(composer.value, 0, [30, 14]));
+  else for (const v of ['--fs', '--lh', '--fw', '--wd', '--ls']) composer.style.removeProperty(v);
+  composer.style.height = 'auto';
+  composer.style.height = Math.min(composer.scrollHeight, 168) + 'px';
+  dock.classList.toggle('has-text', has);
+  dock.classList.toggle('open', has || document.activeElement === composer);
+  dockLabel.textContent = has ? 'Add note' : 'Add';
+  const b = activeBoard(); if (b) $('#dockBoard').textContent = b.name;
+}
+function submitComposer() {
+  const text = composer.value.replace(/^\s*\n/, '').replace(/\s+$/, '');
+  if (!text.trim()) return;
+  composer.value = ''; sizeComposer();
+  if (/^https?:\/\/\S+$/i.test(text)) addUrl(text, { orNote: true });
+  else addNote(text);
+}
+composer.addEventListener('input', sizeComposer);
+composer.addEventListener('focus', sizeComposer);
+composer.addEventListener('blur', sizeComposer);
+composer.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submitComposer(); }
+  else if (e.key === 'Escape') { e.preventDefault(); composer.blur(); }
+});
+
+/* ───────── toast ───────── */
+let toastTimer = null, toastAction = null, hinting = false;
 function toast(msg, { thumb, action, onAction } = {}) {
-  clearTimeout(toastTimer);
-  dock.classList.remove('hint');
-  dock.classList.add('toast'); dock.classList.remove('hidden');
-  dockText.textContent = msg;
-  dockKbd.style.display = 'none';
-  dockThumb.classList.toggle('has', !!thumb);
-  if (thumb) dockThumb.style.backgroundImage = `url("${thumb}")`;
-  dockBtn.querySelector('span').textContent = action || 'Add';
-  dockBtn.querySelector('svg').style.display = action ? 'none' : '';
+  clearTimeout(toastTimer); hinting = false;
+  toastText.textContent = msg;
+  toastThumb.classList.toggle('has', !!thumb);
+  if (thumb) toastThumb.style.backgroundImage = `url("${thumb}")`;
+  toastBtn.hidden = !action; toastBtn.textContent = action || '';
   toastAction = onAction || null;
-  toastTimer = setTimeout(resetDock, action ? 5000 : 2600);
+  toastEl.classList.add('on');
+  toastTimer = setTimeout(hideToast, action ? 5000 : 2600);
 }
+function hideToast() { toastEl.classList.remove('on'); toastAction = null; hinting = false; }
+// A hint stays up until resetDock() (used while dragging).
 function dockHint(msg) {
-  clearTimeout(toastTimer);
-  dock.classList.remove('toast', 'hidden'); dock.classList.add('hint');
-  dockThumb.classList.remove('has');
-  dockText.textContent = msg;
+  clearTimeout(toastTimer); hinting = true;
+  toastText.textContent = msg; toastThumb.classList.remove('has'); toastBtn.hidden = true;
+  toastEl.classList.add('on');
 }
-function resetDock() {
-  dock.classList.remove('toast', 'hint');
-  dockText.textContent = 'Paste an image or link';
-  dockKbd.style.display = '';
-  dockBtn.querySelector('span').textContent = 'Add';
-  dockBtn.querySelector('svg').style.display = '';
-  toastAction = null;
-  dock.classList.toggle('hidden', boardItems().length === 0);
-}
+function resetDock() { if (hinting) hideToast(); }
+toastBtn.addEventListener('click', () => { const f = toastAction; hideToast(); if (f) f(); });
 
 /* ───────── boards ───────── */
 // A new board is a new, unsaved project with its title ready to type into.
@@ -851,12 +967,30 @@ function openFocus(id) {
 }
 function showFocus() {
   const list = boardItems(); const it = list[focusIdx]; if (!it) return;
+  const note = $('#focusNote');
+  $('#focusBoard').textContent = activeBoard().name;
+  $('#focusPos').textContent = `${focusIdx + 1} / ${list.length}`;
+  if (isText(it)) {
+    focusImg.style.display = 'none';
+    const s = noteStyle(parseNote(it.text).body, 0, [80, 21]);
+    applyNoteStyle(note, s);
+    note.classList.toggle('long', s.t > .75);
+    fillNote(note.querySelector('.note'), it.text);
+    note.classList.add('on'); note.scrollTop = 0;
+    // Balanced lines end short of the box; shrink it to the longest line so the block truly centres.
+    const p = note.querySelector('.note-text'); p.style.width = '';
+    const range = document.createRange(); range.selectNodeContents(p);
+    const w = Math.max(0, ...[...range.getClientRects()].map(r => r.width));
+    if (w) p.style.width = Math.ceil(w + 1) + 'px';
+    $('#focusMeta').textContent = `Note · Added ${ago(it.createdAt)}`;
+    return;
+  }
+  note.classList.remove('on');
+  focusImg.style.display = '';
   focusImg.classList.remove('loaded');
   focusImg.onload = () => focusImg.classList.add('loaded');
   focusImg.src = srcOf(it);
   if (focusImg.complete) focusImg.classList.add('loaded');
-  $('#focusBoard').textContent = activeBoard().name;
-  $('#focusPos').textContent = `${focusIdx + 1} / ${list.length}`;
   let host = '';
   if (it.source) { try { host = ' · ' + new URL(it.source).hostname.replace(/^www\./, ''); } catch {} }
   $('#focusMeta').textContent = `${it.w} × ${it.h} · Added ${ago(it.createdAt)}${host}`;
@@ -933,15 +1067,15 @@ function loadProject({ dir, manifest: m }, path) {
   urls.clear(); undo.length = 0;
   // Same naming rule the Rust side enforces when unpacking; links must be web addresses.
   // (Version 1 files held several boards: all their items land on this one.)
-  const usable = i => typeof i.file === 'string' ? /^[A-Za-z0-9_-]{1,64}\.[A-Za-z0-9]{1,5}$/.test(i.file)
-    : typeof i.src === 'string' && /^https?:\/\//i.test(i.src);
-  state.items = (m && Array.isArray(m.items) ? m.items : [])
-    .filter(i => i && i.id && usable(i) && i.w > 0 && i.h > 0);
+  const usable = i => i.kind === 'text' ? typeof i.text === 'string' && i.text.trim() !== ''
+    : (typeof i.file === 'string' ? /^[A-Za-z0-9_-]{1,64}\.[A-Za-z0-9]{1,5}$/.test(i.file)
+      : typeof i.src === 'string' && /^https?:\/\//i.test(i.src)) && i.w > 0 && i.h > 0;
+  state.items = (m && Array.isArray(m.items) ? m.items : []).filter(i => i && i.id && usable(i));
   state.query = ''; searchEl.value = '';
   closeFocus(); closeMenu(); clearGrid();
   scroll.scrollTop = 0; updateHeader();
   head.classList.remove('swap'); void head.offsetWidth; head.classList.add('swap');
-  renderHead(); renderSidebar(); renderGrid({ entrance: true, recount: true }); resetDock();
+  renderHead(); renderSidebar(); renderGrid({ entrance: true, recount: true }); resetDock(); sizeComposer();
   // The board we left needs a fresh summary for its sidebar row.
   if (previous && !samePath(previous, path)) refreshLibrary([previous]);
 }
@@ -1069,7 +1203,8 @@ document.addEventListener('click', e => {
   else if (act === 'toggle-sidebar') toggleSidebar();
   else if (act === 'pin') togglePin();
   else if (act === 'toggle-theme') toggleTheme();
-  else if (act === 'pick-files') { if (toastAction) { const f = toastAction; resetDock(); f(); } else filePick.click(); }
+  else if (act === 'pick-files') filePick.click();
+  else if (act === 'dock-add') { if (composer.value.trim()) submitComposer(); else filePick.click(); }
   else if (act === 'close-focus') closeFocus();
   else if (act === 'focus-prev') stepFocus(-1);
   else if (act === 'focus-next') stepFocus(1);
@@ -1154,6 +1289,8 @@ document.addEventListener('keydown', e => {
   if (typing) return;
   if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); restore(); return; }
   if (e.key === 'Escape') closeMenu();
+  // Start typing anywhere and it goes into the composer.
+  if (!mod && !e.altKey && e.key && e.key.length === 1 && e.key !== ' ') { composer.focus(); return; }
   if (state.hovered) {
     const it = byId(state.hovered);
     if (!it) return;
@@ -1194,7 +1331,8 @@ booted = (async function boot() {
   measureHead();
   refreshLibrary(); // fills in the other boards' rows
   if (problem) toast(`Couldn’t ${launch ? 'open' : 'reopen'} ${baseName(first)}. ${problem}`);
-  if (document.fonts) document.fonts.ready.then(measureHead);
+  sizeComposer();
+  if (document.fonts) document.fonts.ready.then(() => { measureHead(); noteCache.clear(); layout(); });
   setInterval(renderHead, 30000);
 })();
 })();

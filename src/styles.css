@@ -389,6 +389,49 @@ body.dragging .board-link .more { opacity: 0 !important; }
 .card-actions button:hover { background: #fff; }
 .card-actions button:active { transform: scale(.92); }
 
+/* ───────── Text cards ─────────
+   Set as type, not as sticky notes: a hairline rule, the words, a small foot.
+   Size follows length (short notes go large and condensed) and scales with
+   the column width, like the images do. The card is as tall as its text. */
+.card.is-text { cursor: zoom-in; }
+.card.is-text .card-in { background: none; border-radius: 0; overflow: visible; }
+.note { position: relative; padding: 13px 0 4px; }
+.note::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
+  background: var(--ink); transform-origin: 0 50%;
+  transition: background .2s;
+}
+.card.is-text:hover .note::before { background: var(--accent); }
+.note-text {
+  margin: 0;
+  font-size: var(--fs, 15px); line-height: var(--lh, 1.4); font-weight: var(--fw, 440);
+  font-stretch: var(--wd, 100%); letter-spacing: var(--ls, 0);
+  white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: pretty;
+}
+.note.display .note-text { text-wrap: balance; }
+/* Quotes: the opening mark hangs into the gutter, the source sits quietly below */
+.note.quote .note-text::before { content: '\201C'; position: absolute; transform: translateX(-100%); }
+.note-by { margin: 10px 0 0; font-size: 12px; font-weight: 520; color: var(--ink-2); font-stretch: 100%; }
+/* On hover a small tab sits on the rule: when it was written, copy, remove */
+.note-foot {
+  position: absolute; top: -11px; right: 0;
+  display: flex; align-items: center; gap: 6px;
+  height: 22px; padding-left: 8px; background: var(--bg);
+  font-size: 11px; font-weight: 520; color: var(--ink-3); font-variant-numeric: tabular-nums;
+  opacity: 0; transition: opacity .2s, background .3s;
+}
+.card.is-text:hover .note-foot { opacity: 1; }
+.note-actions { display: flex; gap: 2px; }
+.note-actions button { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--ink-2); }
+.note-actions button:hover { background: var(--hover); color: var(--ink); }
+/* A new note is typeset: the rule draws in, then the words settle */
+.card.is-text.is-new .card-in { animation: none; }
+.card.is-text.is-new .note::before { animation: rule .7s var(--ease-out) both; }
+.card.is-text.is-new .note-text, .card.is-text.is-new .note-by { animation: settle .7s var(--ease-out) .12s both; }
+@keyframes rule { from { transform: scaleX(0); } }
+@keyframes settle { from { opacity: 0; transform: translateY(6px); } }
+.note-measure { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; }
+
 /* dragging: the picked-up card leaves a soft slot behind */
 body.dragging, body.dragging * { cursor: grabbing !important; }
 body.dragging .card-ui { display: none; }
@@ -406,6 +449,9 @@ body.dragging .card:hover img.loaded { transform: none; filter: none; }
 .ghost.up .ghost-in { transform: scale(1.045); box-shadow: var(--lift); }
 .ghost.over-board .ghost-in { transform: scale(.3); border-radius: 36px; }
 .ghost-in img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ghost-in.is-text { background: var(--bg) !important; left: -12px; right: -12px; bottom: auto; padding: 0 12px 2px; overflow: visible; }
+.ghost-in.is-text .note-actions { display: none; }
+.card.ghosted .note { opacity: 0; }
 
 /* ───────── Empty ───────── */
 .empty { position: absolute; inset: 0; display: none; place-items: center; pointer-events: none; z-index: 2; }
@@ -443,33 +489,76 @@ body.dragging .card:hover img.loaded { transform: none; filter: none; }
 .empty-copy .add-link { margin-top: 26px; display: inline-flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 520; border-bottom: 1px solid var(--line-2); padding-bottom: 2px; transition: border-color .15s; }
 .empty-copy .add-link:hover { border-color: var(--ink); }
 
-/* ───────── Dock ───────── */
-.dock {
+/* ───────── Composer: the dock you paste, drop or type into ───────── */
+/* Composer and toast share a column at the bottom of the panel, so the toast
+   always clears the composer however tall it grows. */
+.dock-wrap {
   position: absolute; left: 50%; bottom: 22px; translate: -50% 0;
-  display: flex; align-items: center; gap: 10px;
-  height: 42px; padding: 0 5px 0 17px; border-radius: 999px;
+  width: calc(100% - 40px);
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  pointer-events: none; z-index: 6;
+}
+.dock {
+  pointer-events: auto;
+  display: grid; grid-template-rows: 0fr auto;
+  width: 360px; max-width: 100%;
+  padding: 0 5px 5px 18px; border-radius: 22px;
   background: var(--dock-bg); color: var(--dock-ink);
   box-shadow: 0 1px 1px rgba(0, 0, 0, .08), 0 12px 32px -10px rgba(0, 0, 0, .4);
-  white-space: nowrap;
-  transition: opacity .3s, transform .45s var(--ease-out), padding .3s var(--ease-out);
-  z-index: 6;
+  transition: width .5s var(--ease-out), grid-template-rows .45s var(--ease-out), border-radius .35s var(--ease-out), transform .45s var(--ease-out), opacity .3s;
 }
-.dock.hidden { opacity: 0; transform: translateY(14px); pointer-events: none; }
-.dock-msg { display: flex; align-items: center; gap: 9px; color: var(--dock-ink-2); }
-.dock-msg .kbd { color: var(--dock-ink-2); box-shadow: inset 0 0 0 1px var(--dock-line); }
-.dock-thumb { width: 24px; height: 24px; border-radius: 7px; margin-left: -8px; background: var(--card) center / cover; display: none; }
-.dock.toast .dock-thumb.has { display: block; }
-.dock.toast .dock-msg, .dock.hint .dock-msg { color: var(--dock-ink); }
-.dock.hint { padding-right: 17px; }
-.dock.hint .dock-sep, .dock.hint .dock-btn, .dock.hint .kbd { display: none; }
-.dock-sep { width: 1px; height: 16px; background: var(--dock-line); }
+.dock.open { width: 560px; grid-template-rows: 1fr auto; border-radius: 18px; }
+.dock-head {
+  min-height: 0; overflow: hidden;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-right: 9px; font-size: 11.5px; color: var(--dock-ink-2); white-space: nowrap;
+  opacity: 0; transition: opacity .25s;
+}
+.dock.open .dock-head { opacity: 1; transition-delay: .1s; }
+.dock-head > span { padding-top: 13px; }
+.dock-head b { color: var(--dock-ink); font-weight: 540; }
+.dock-head i { font-style: normal; margin-left: 12px; }
+.dock-row { display: flex; align-items: flex-end; gap: 8px; padding-top: 5px; }
+.composer {
+  flex: 1; min-width: 0; align-self: center;
+  max-height: 168px; margin: 7px 0; padding: 0;
+  border: 0; outline: 0; resize: none; background: none;
+  color: var(--dock-ink); font: inherit;
+  font-size: var(--fs, 13.5px); line-height: var(--lh, 20px); font-weight: var(--fw, 400);
+  font-stretch: var(--wd, 100%); letter-spacing: var(--ls, 0);
+  caret-color: var(--accent);
+  scrollbar-width: none;
+}
+.composer::-webkit-scrollbar { display: none; }
+.composer::placeholder { color: var(--dock-ink-2); opacity: 1; }
+.dock .kbd { align-self: center; color: var(--dock-ink-2); box-shadow: inset 0 0 0 1px var(--dock-line); white-space: nowrap; }
+.dock.open .kbd { display: none; }
 .dock-btn {
-  height: 32px; padding: 0 13px; border-radius: 999px;
+  height: 34px; padding: 0 14px; border-radius: 999px; flex: none;
   display: flex; align-items: center; gap: 6px;
-  font-weight: 540; color: var(--dock-ink);
-  transition: background .15s;
+  font-weight: 540; color: var(--dock-ink); white-space: nowrap;
+  box-shadow: inset 0 0 0 1px var(--dock-line);
+  transition: background .15s, color .15s, box-shadow .15s;
 }
 .dock-btn:hover { background: var(--dock-line); }
+.dock.has-text .dock-btn { background: var(--dock-ink); color: var(--dock-bg); box-shadow: none; }
+.dock.has-text .dock-btn .plus { display: none; }
+
+/* ───────── Toast: floats above the composer ───────── */
+.toast {
+  display: flex; align-items: center; gap: 10px;
+  height: 36px; padding: 0 16px; border-radius: 999px;
+  background: var(--dock-bg); color: var(--dock-ink); font-size: 13px; white-space: nowrap;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, .08), 0 12px 32px -10px rgba(0, 0, 0, .4);
+  opacity: 0; transform: translateY(8px) scale(.97); pointer-events: none;
+  transition: opacity .2s, transform .4s var(--ease-out);
+}
+.toast.on { opacity: 1; transform: none; pointer-events: auto; }
+.toast-thumb { display: none; width: 22px; height: 22px; margin-left: -9px; border-radius: 6px; background: var(--card) center / cover; }
+.toast-thumb.has { display: block; }
+.toast button { margin-right: -6px; padding: 4px 8px; border-radius: 999px; font-weight: 560; color: var(--dock-ink); box-shadow: inset 0 0 0 1px var(--dock-line); }
+.toast button:hover { background: var(--dock-line); }
+.toast button[hidden] { display: none; }
 
 /* ───────── Drop overlay ───────── */
 .drop {
@@ -573,6 +662,34 @@ body.dragging .card:hover img.loaded { transform: none; filter: none; }
   transition: transform .45s var(--ease-out), opacity .3s;
 }
 .focus.open .focus-stage img.loaded { transform: none; opacity: 1; }
+.focus-note {
+  position: absolute; inset: 0 72px; display: none; overflow-y: auto; scrollbar-width: none;
+  opacity: 0; transform: translateY(8px); transition: opacity .3s, transform .45s var(--ease-out);
+}
+.focus-note.on { display: grid; }
+.focus.open .focus-note.on { opacity: 1; transform: none; }
+.focus-note .note { margin: auto; padding: 40px 0; color: #ecebe6; }
+.focus-note .note::before { display: none; }
+/* widths in em of the note's own size: ~14 words a line for short notes, a book measure for long ones */
+.focus-note .note-text { max-width: 13em; text-wrap: balance; }
+.focus-note .note-by { margin-top: 1.4em; font-size: 15px; color: rgba(236, 235, 230, .6); }
+.focus-note.long .note-text { max-width: 34em; text-wrap: pretty; }
+.focus .icon-btn { color: rgba(236, 235, 230, .7); border-radius: 999px; }
+.focus .icon-btn:hover { background: rgba(236, 235, 230, .08); color: #fff; }
+.focus-nav {
+  position: absolute; top: 0; bottom: 0; width: 72px;
+  display: grid; place-items: center;
+  color: rgba(236, 235, 230, .45);
+  transition: color .15s;
+}
+.focus-nav:hover { color: #fff; }
+.focus-nav.prev { left: 0; } .focus-nav.next { right: 0; }
+.focus-bot .actions { display: flex; gap: 4px; }
+.focus-bot .actions button {
+  height: 30px; padding: 0 12px; border-radius: 999px;
+  display: flex; align-items: center; gap: 7px; color: rgba(236, 235, 230, .8);
+}
+.focus-bot .actions button:hover { background: rgba(236, 235, 230, .08); color: #fff; }
 .focus .icon-btn { color: rgba(236, 235, 230, .7); border-radius: 999px; }
 .focus .icon-btn:hover { background: rgba(236, 235, 230, .08); color: #fff; }
 .focus-nav {
@@ -603,8 +720,9 @@ body.dragging .card:hover img.loaded { transform: none; filter: none; }
   .density, .tools-div { display: none; }
   .tools { padding-left: 3px; }
   .empty-copy h2 { font-size: 40px; }
-  .dock-msg #dockText { display: none; }
-  .dock.toast .dock-msg #dockText, .dock.hint .dock-msg #dockText { display: inline; }
+  .dock-wrap { width: calc(100% - 24px); }
+  .dock, .dock.open { width: 100%; }
+  .dock-head i { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
