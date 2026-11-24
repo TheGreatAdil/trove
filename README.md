@@ -92,6 +92,36 @@ Recommended editor setup: [VS Code](https://code.visualstudio.com/) with the [Ta
 - A Keep on top button keeps the window above other apps.
 - Light and dark themes.
 - Runs fully offline. The fonts ship with the app.
+- An optional MCP server lets coding agents read your boards (see below).
+
+## Connecting AI agents (MCP)
+
+Trove can run a small MCP server so a coding agent (Claude Code, Cursor, VS Code, or any other MCP client) can read your boards while it works: the notes in full, each image's size, colour and source link, and the images themselves.
+
+Click **MCP** at the bottom of the sidebar. It turns on and copies its link; paste that into your agent. The toast also offers the ready-made Claude Code command. Click **MCP** again to turn it off. Hovering the button shows the link while it's on.
+
+```sh
+# Claude Code
+claude mcp add --transport http trove http://127.0.0.1:8768/mcp/<secret>
+```
+
+```json
+{ "mcpServers": { "trove": { "type": "http", "url": "http://127.0.0.1:8768/mcp/<secret>" } } }
+```
+
+The agent gets four read-only tools:
+
+| Tool | What it returns |
+|---|---|
+| `list_boards` | The open board (with unsaved changes) and every saved board in the sidebar, with note and image counts |
+| `get_board` | One board in board order: every note's text, and each image's id, size, dominant colour, source link and date |
+| `get_image` | One image, scaled down to 1568px on its long edge by default (`max_size` changes that) |
+| `search` | Notes and image links containing some text, across all boards or one |
+
+- **Private by default.** The server listens on `127.0.0.1` only, answers only on the secret link, and rejects requests from web pages (it checks `Host` and `Origin`).
+- **Read-only.** Agents can't change, add or delete anything.
+- **Stays on.** Trove remembers the setting and the link, and starts the server again next time. If port 8768 is taken, it picks a free port and says so; the link it copies is the new one.
+- **Transport:** MCP's Streamable HTTP, answering with plain JSON (no server-sent events), protocol versions 2025-06-18, 2025-03-26 and 2024-11-05. The code is in [src-tauri/src/mcp.rs](src-tauri/src/mcp.rs).
 
 ## Keyboard
 

@@ -1105,7 +1105,7 @@ function loadLibrary() {
     library = Array.isArray(list) ? list.filter(p => typeof p === 'string') : [];
   } catch { library = []; }
 }
-function saveLibrary() { localStorage.setItem('trove.library', JSON.stringify(library)); }
+function saveLibrary() { localStorage.setItem('trove.library', JSON.stringify(library)); mcpSync(); }
 function rememberBoard(path) { library = [path, ...library.filter(p => !samePath(p, path))]; saveLibrary(); }
 function forgetBoard(path) {
   library = library.filter(p => !samePath(p, path));
@@ -1132,7 +1132,7 @@ function renderProject() {
 }
 
 // Every edit to the board goes through here.
-function touch() { project.rev++; project.dirty = true; project.updatedAt = Date.now(); renderProject(); }
+function touch() { project.rev++; project.dirty = true; project.updatedAt = Date.now(); renderProject(); mcpSync(); }
 
 const manifestItem = ({ id, kind, text, file, src, w, h, color, tone, createdAt, pos, source }) =>
   ({ id, kind, text, file, src, w, h, color, tone, createdAt, pos, source });
@@ -1169,6 +1169,7 @@ function loadProject({ dir, manifest: m }, path) {
   renderHead(); renderSidebar(); renderGrid({ entrance: true, recount: true }); resetDock(); sizeComposer();
   // The board we left needs a fresh summary for its sidebar row.
   if (previous && !samePath(previous, path)) refreshLibrary([previous]);
+  mcpSync();
 }
 
 // One board operation at a time (a save while a dialog is open, double shortcuts...).
@@ -1232,7 +1233,7 @@ async function saveProject({ as = false } = {}) {
     const res = await invoke('project_save', { path, manifest: manifest(name) });
     project.path = res.path; project.name = name;
     project.dirty = project.rev !== rev; // edits made while saving still count
-    rememberBoard(res.path);
+    rememberBoard(res.path); // (also tells the MCP server about the saved state)
     renderHead(); renderSidebar();
     toast(res.missing ? `Saved, but ${plural(res.missing, 'image')} couldn’t be found` : `Saved ${project.name}`);
     return true;
@@ -1395,6 +1396,75 @@ document.addEventListener('keydown', e => {
   }
 });
 
+/* ───────── MCP: let coding agents read the boards ─────────
+   One click on the MCP button turns on a read-only MCP server on this computer and
+   copies its link (http://127.0.0.1:<port>/mcp/<secret>) to give to an agent; the
+   next click turns it off. The link stays the same from one session to the next. The server reads saved
+   boards straight from their files; the open board, unsaved changes and all, is
+   pushed to it here whenever it changes. */
+const mcpBtn = $('#mcpBtn');
+const MCP_PORT = 8768; // T-R-O-V on a phone keypad
+const mcp = { on: false, port: MCP_PORT, token: '', url: '', note: '' };
+try { Object.assign(mcp, JSON.parse(localStorage.getItem('trove.mcp') || '{}'), { url: '', note: '' }); } catch {}
+const saveMcp = () => localStorage.setItem('trove.mcp', JSON.stringify({ on: mcp.on, port: mcp.port, token: mcp.token }));
+// 18 characters from a 32-letter alphabet: 90 random bits, nothing easy to misread.
+const newToken = () => [...crypto.getRandomValues(new Uint8Array(18))].map(b => 'abcdefghijkmnpqrstuvwxyz23456789'[b % 32]).join('');
+const mcpSnapshot = () => ({
+  open: { name: project.name, path: project.path, unsaved: project.dirty, items: state.items.map(manifestItem) },
+  library,
+});
+let mcpTimer = 0;
+function mcpSync() { if (!mcp.url) return; clearTimeout(mcpTimer); mcpTimer = setTimeout(mcpSyncNow, 250); }
+function mcpSyncNow() { clearTimeout(mcpTimer); if (mcp.url) invoke('mcp_sync', mcpSnapshot()).catch(e => console.warn('MCP sync', e)); }
+
+const claudeCommand = () => `claude mcp add --transport http trove ${mcp.url}`;
+async function copyText(text, done) {
+  try { await navigator.clipboard.writeText(text); toast(done.msg, done); }
+  catch { toast(`Couldn’t copy. The link is ${mcp.url}`); }
+}
+// `copy`: put the link on the clipboard (a click); a restart at launch doesn't.
+async function mcpStart({ copy = false } = {}) {
+  if (!mcp.token) mcp.token = newToken();
+  const wanted = mcp.port;
+  try {
+    const s = await invoke('mcp_start', { port: wanted, token: mcp.token });
+    Object.assign(mcp, { on: true, port: s.port, url: s.url });
+    mcpSyncNow();
+    const moved = s.port !== wanted ? `Port ${wanted} was taken, so the link changed. ` : '';
+    if (copy) {
+      copyText(mcp.url, {
+        msg: `${moved}MCP is on. Link copied: paste it into your agent.`,
+        action: 'Copy for Claude Code',
+        onAction: () => copyText(claudeCommand(), { msg: 'Claude Code command copied. Run it in a terminal.' }),
+      });
+    } else if (moved) toast(`MCP is on, but port ${wanted} was taken, so its link changed. Click MCP twice to copy the new one.`);
+  } catch (e) {
+    Object.assign(mcp, { on: false, url: '' });
+    toast(errMsg(e));
+  }
+  saveMcp(); renderMcp();
+}
+async function mcpStop() {
+  Object.assign(mcp, { on: false, url: '' });
+  saveMcp(); renderMcp();
+  try { await invoke('mcp_stop'); } catch (e) { console.warn(e); }
+  toast('MCP is off. Agents can no longer read your boards.');
+}
+function renderMcp() {
+  const live = !!mcp.url;
+  mcpBtn.classList.toggle('on', live);
+  mcpBtn.setAttribute('aria-pressed', String(live));
+  mcpBtn.title = live ? `MCP is on: ${mcp.url}\nClick to turn it off` : 'Turn on MCP and copy a link for AI agents';
+}
+let mcpBusy = false;
+mcpBtn.addEventListener('click', async () => {
+  if (mcpBusy) return;
+  mcpBusy = true;
+  try { if (mcp.url) await mcpStop(); else await mcpStart({ copy: true }); }
+  finally { mcpBusy = false; }
+});
+renderMcp();
+
 /* ───────── opening from the OS ───────── */
 // Double-clicking a .trv (or "Open with") while Trove is running arrives here.
 // Waits for boot and for any dialog or save in progress before switching.
@@ -1425,6 +1495,7 @@ booted = (async function boot() {
   if (opened) rememberBoard(first);
   measureHead();
   refreshLibrary(); // fills in the other boards' rows
+  if (mcp.on) mcpStart(); // it was left on last time
   if (problem) toast(`Couldn’t ${launch ? 'open' : 'reopen'} ${fileName(first)}. ${problem}`);
   sizeComposer();
   // Notes are measured off-screen, so wait for Geist too (it loads only once a note needs it).

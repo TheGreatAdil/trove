@@ -181,6 +181,23 @@ fn read_manifest_from<R: Read + io::Seek>(zip: &mut ZipArchive<R>) -> Result<Val
     Ok(manifest)
 }
 
+/// Reads a saved board's manifest without unpacking the file.
+pub fn read_manifest(path: &Path) -> Result<Value, String> {
+    read_manifest_from(&mut open_zip(path)?)
+}
+
+/// Reads one image out of a saved board without unpacking the rest.
+pub fn read_image(path: &Path, name: &str) -> Result<Vec<u8>, String> {
+    if !is_safe_name(name) {
+        return Err(format!("Invalid image name: {name}"));
+    }
+    let mut zip = open_zip(path)?;
+    let mut entry = zip.by_name(&format!("{IMAGES}/{name}")).map_err(|_| format!("The image {name} is missing from this board."))?;
+    let mut bytes = Vec::new();
+    entry.read_to_end(&mut bytes).map_err(|e| format!("Couldn't read the image: {e}"))?;
+    Ok(bytes)
+}
+
 fn open_zip(path: &Path) -> Result<ZipArchive<File>, String> {
     let file = File::open(path).map_err(|e| match e.kind() {
         io::ErrorKind::NotFound => "That project file no longer exists.".to_string(),

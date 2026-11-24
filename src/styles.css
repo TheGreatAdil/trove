@@ -218,7 +218,23 @@ body.dragging .board-link .more { opacity: 0 !important; }
 @keyframes received { 0% { box-shadow: 0 0 0 1.5px var(--ink); } 100% { box-shadow: 0 0 0 1.5px transparent; } }
 .no-results { color: var(--ink-3); padding: 14px 8px; }
 
-.side-foot { padding: 10px 10px 14px 18px; display: flex; align-items: center; justify-content: flex-end; }
+.side-foot { padding: 10px 10px 14px 12px; display: flex; align-items: center; justify-content: space-between; }
+/* MCP: a quiet status pill; the dot lights up while agents can connect */
+.mcp-btn {
+  display: flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 11px 0 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 560; letter-spacing: .02em; color: var(--ink-2);
+  transition: background .15s, color .15s;
+}
+.mcp-btn:hover { background: var(--hover); color: var(--ink); }
+.mcp-dot { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); opacity: .55; transition: background .2s, opacity .2s; }
+.mcp-btn.on { color: var(--ink); }
+.mcp-btn.on .mcp-dot { background: var(--accent); opacity: 1; }
+.mcp-btn.on .mcp-dot::after {
+  content: ''; position: absolute; inset: -4px; border-radius: 50%;
+  border: 1.5px solid var(--accent); opacity: 0; animation: mcp-pulse 2.4s var(--ease-out) infinite;
+}
+@keyframes mcp-pulse { 0% { opacity: .6; transform: scale(.5); } 70%, 100% { opacity: 0; transform: scale(1.4); } }
 
 /* Unsaved changes: a dot on the open board's row, and a note in the header */
 .board-link .count.unsaved { width: 6px; height: 6px; padding: 0; margin-right: 8px; border-radius: 50%; background: var(--accent); }

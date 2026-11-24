@@ -1,7 +1,8 @@
+mod mcp;
 mod project;
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -202,6 +203,51 @@ async fn image_read(state: State<'_, Mutex<Session>>, file: String) -> CmdResult
     Ok(Response::new(bytes))
 }
 
+/// The MCP server that lets coding agents read the boards, when it's switched on.
+struct Mcp {
+    shared: Arc<mcp::Shared>,
+    running: Mutex<Option<mcp::Running>>,
+}
+
+#[derive(Serialize)]
+struct McpStatus {
+    port: u16,
+    url: String,
+}
+
+/// Starts (or restarts) the MCP server. `token` is the secret part of the link.
+/// If `port` is taken, another free port is used; the link says which.
+#[tauri::command]
+fn mcp_start(mcp: State<'_, Mcp>, port: u16, token: String) -> CmdResult<McpStatus> {
+    if token.len() < 16 || !token.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("The MCP link token is invalid.".into());
+    }
+    let mut running = mcp.running.lock().unwrap();
+    if let Some(old) = running.take() {
+        old.stop();
+    }
+    let server = mcp::start(mcp.shared.clone(), port, token.clone())?;
+    let status = McpStatus { port: server.port, url: format!("http://127.0.0.1:{}/mcp/{token}", server.port) };
+    *running = Some(server);
+    Ok(status)
+}
+
+#[tauri::command]
+fn mcp_stop(mcp: State<'_, Mcp>) {
+    if let Some(server) = mcp.running.lock().unwrap().take() {
+        server.stop();
+    }
+}
+
+/// The frontend keeps the server up to date with the open board (unsaved
+/// changes included) and the saved boards in the sidebar.
+#[tauri::command]
+fn mcp_sync(mcp: State<'_, Mcp>, open: Option<mcp::OpenBoard>, library: Vec<String>) {
+    let mut snapshot = mcp.shared.snapshot.write().unwrap();
+    snapshot.open = open;
+    snapshot.library = library;
+}
+
 /// Called once by the frontend when it has booted. Returns the `.trv` the app
 /// was launched with, if any; later requests arrive as `open-project` events.
 #[tauri::command]
@@ -261,6 +307,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(Session::default()))
         .manage(Mutex::new(Launch { ready: false, pending: launch_path }))
+        .setup(|app| {
+            let handle = app.handle().clone();
+            app.manage(Mcp {
+                shared: Arc::new(mcp::Shared {
+                    snapshot: RwLock::new(mcp::Snapshot::default()),
+                    session_dir: Box::new(move || handle.state::<Mutex<Session>>().lock().unwrap().dir.clone()),
+                }),
+                running: Mutex::new(None),
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             project_new,
             project_open,
@@ -272,6 +329,9 @@ pub fn run() {
             image_put,
             image_read,
             take_launch_path,
+            mcp_start,
+            mcp_stop,
+            mcp_sync,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
