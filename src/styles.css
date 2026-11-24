@@ -200,9 +200,7 @@ body.dragging .board-link .more { opacity: 0 !important; }
 @keyframes received { 0% { box-shadow: 0 0 0 1.5px var(--ink); } 100% { box-shadow: 0 0 0 1.5px transparent; } }
 .no-results { color: var(--ink-3); padding: 14px 8px; }
 
-.side-foot { padding: 10px 10px 14px 18px; display: flex; align-items: center; justify-content: space-between; }
-.lib-stat { font-size: 12px; color: var(--ink-3); line-height: 1.35; }
-.lib-stat b { color: var(--ink-2); font-weight: 520; }
+.side-foot { padding: 10px 10px 14px 18px; display: flex; align-items: center; justify-content: flex-end; }
 
 /* Unsaved changes: a dot on the open board's row, and a note in the header */
 .board-link .count.unsaved { width: 6px; height: 6px; padding: 0; margin-right: 8px; border-radius: 50%; background: var(--accent); }

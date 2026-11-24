@@ -130,7 +130,6 @@ function renderSidebar() {
     a.append(th, nm, ct, mo);
     listEl.append(a);
   }
-  $('#libStat').innerHTML = `<b>${plural(all.length, 'board')}</b><br>Each saved as a .trv file`;
   renderProject();
 }
 
