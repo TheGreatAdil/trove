@@ -222,12 +222,19 @@ function focusTitle() {
 /* Header collapses as you scroll: the big title shrinks into a compact one while
    images slide underneath a progressive blur. Nothing in the grid moves. */
 let geo = null;
+// Distance from the top of `ancestor`. offset* values ignore transforms, but an
+// element mid-animation (the header slides in when a board opens) becomes the
+// offsetParent of its children, so walk the chain instead of trusting one hop.
+function offsetWithin(el, ancestor) {
+  let y = 0;
+  for (let n = el; n && n !== ancestor; n = n.offsetParent) y += n.offsetTop;
+  return y;
+}
 function measureHead() {
-  // offset* values ignore transforms, so this is safe mid-animation
   geo = {
-    H: metaEl.offsetTop + metaEl.offsetHeight,
-    rowTop: titleRow.offsetTop, rowH: titleRow.offsetHeight,
-    toolsC: toolsEl.offsetTop + toolsEl.offsetHeight / 2,
+    H: offsetWithin(metaEl, head) + metaEl.offsetHeight,
+    rowTop: offsetWithin(titleRow, head), rowH: titleRow.offsetHeight,
+    toolsC: offsetWithin(toolsEl, head) + toolsEl.offsetHeight / 2,
   };
   stage.style.setProperty('--head-h', Math.round(geo.H + 32) + 'px');
   updateHeader();
