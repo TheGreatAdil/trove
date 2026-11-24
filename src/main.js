@@ -298,24 +298,23 @@ function noteT(text) {
 }
 const notePad = cw => clamp(cw * .08, 14, 22);
 // `scale` maps t to a font size: [px at t=0, px at t=1]
-function noteStyle(text, cw, scale = [clamp(cw * .118, 19, 34), clamp(cw * .064, 13, 15.5)]) {
+function noteStyle(text, cw, scale = [clamp(cw * .1, 18, 30), clamp(cw * .066, 13.5, 15)]) {
   const t = noteT(text);
   return {
-    t, fs: lerp(scale[0], scale[1], t), lh: lerp(1.08, 1.45, t),
-    fw: lerp(560, 440, t), wd: lerp(88, 100, t), ls: lerp(-.026, -.003, t), pad: cw ? notePad(cw) : 0,
+    t, fs: lerp(scale[0], scale[1], t), lh: lerp(1.18, 1.5, t),
+    fw: lerp(500, 400, t), ls: lerp(-.028, -.006, t), pad: cw ? notePad(cw) : 0,
   };
 }
 function applyNoteStyle(el, s) {
   el.style.setProperty('--fs', s.fs.toFixed(2) + 'px');
   el.style.setProperty('--lh', s.lh.toFixed(3));
   el.style.setProperty('--fw', Math.round(s.fw));
-  el.style.setProperty('--wd', s.wd.toFixed(1) + '%');
   el.style.setProperty('--ls', s.ls.toFixed(4) + 'em');
   if (s.pad) el.style.setProperty('--np', s.pad.toFixed(1) + 'px');
   const note = el.querySelector('.note'); if (note) note.classList.toggle('display', s.t < .4);
 }
-// A short note still makes a proper tile rather than a strip.
-const noteMinH = cw => Math.round(cw * .62);
+// A one-word note still makes a card rather than a sliver, without a big empty tile in wide columns.
+const noteMinH = cw => Math.round(Math.min(cw * .38, 96));
 // "Words.\n— Source" reads as a quote: the source line is split off.
 function parseNote(text) {
   const m = text.match(/^([\s\S]*?\S)\s*\n\s*[—–]\s*(\S.{0,48})$/);
@@ -585,7 +584,7 @@ function startDrag() {
   gin.style.transformOrigin = `${d.offX}px ${d.offY}px`; // lift and shrink around the grab point
   if (isText(d.it)) {
     gin.classList.add('is-text');
-    for (const v of ['--fs', '--lh', '--fw', '--wd', '--ls', '--np']) gin.style.setProperty(v, d.card.style.getPropertyValue(v));
+    for (const v of ['--fs', '--lh', '--fw', '--ls', '--np']) gin.style.setProperty(v, d.card.style.getPropertyValue(v));
     gin.append(d.card.querySelector('.note').cloneNode(true));
   } else {
     gin.style.background = d.it.color || 'var(--card)';
@@ -897,8 +896,8 @@ async function copyItem(it) {
 // While you type, the text is set on the same curve as the card it will become.
 function sizeComposer() {
   const has = composer.value.trim().length > 0;
-  if (has) applyNoteStyle(composer, noteStyle(composer.value, 0, [30, 14]));
-  else for (const v of ['--fs', '--lh', '--fw', '--wd', '--ls']) composer.style.removeProperty(v);
+  if (has) applyNoteStyle(composer, noteStyle(composer.value, 0, [26, 14]));
+  else for (const v of ['--fs', '--lh', '--fw', '--ls']) composer.style.removeProperty(v);
   composer.style.height = 'auto';
   composer.style.height = Math.min(composer.scrollHeight, 168) + 'px';
   dock.classList.toggle('has-text', has);
@@ -1050,7 +1049,7 @@ function showFocus() {
   if (isText(it)) {
     // The card itself, enlarged: wider for long notes so they keep a reading measure.
     focusImg.style.display = 'none';
-    const s = noteStyle(parseNote(it.text).body, 0, [60, 19]);
+    const s = noteStyle(parseNote(it.text).body, 0, [52, 19]);
     applyNoteStyle(note, s);
     note.style.setProperty('--np', lerp(52, 44, s.t).toFixed(1) + 'px');
     note.style.setProperty('--card-w', Math.round(lerp(560, 700, s.t)) + 'px');
@@ -1420,7 +1419,9 @@ booted = (async function boot() {
   refreshLibrary(); // fills in the other boards' rows
   if (problem) toast(`Couldn’t ${launch ? 'open' : 'reopen'} ${baseName(first)}. ${problem}`);
   sizeComposer();
-  if (document.fonts) document.fonts.ready.then(() => { measureHead(); noteCache.clear(); layout(); });
+  // Notes are measured off-screen, so wait for Geist too (it loads only once a note needs it).
+  if (document.fonts) Promise.all([document.fonts.ready, document.fonts.load('16px Geist').catch(() => {})])
+    .then(() => { measureHead(); noteCache.clear(); layout(); });
   setInterval(renderHead, 30000);
 })();
 })();

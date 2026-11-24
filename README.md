@@ -71,7 +71,7 @@ Recommended editor setup: [VS Code](https://code.visualstudio.com/) with the [Ta
 
 **Notes**
 - The dock at the bottom of the board is a composer. Type into it, or just start typing anywhere on the board, and press Enter: the note lands on the board as a text card. Shift+Enter adds a line, Esc closes it.
-- A note is a card like an image: a warm paper tile with the words set inside. A few words are set large and condensed, and a paragraph reads as body text. Size, weight, width and line spacing follow one continuous curve over the note's length (Mona Sans' variable axes), and scale with the column width like the images do.
+- A note is a card like an image: a neutral grey tile with the words set inside in Geist. A few words are set large, and a paragraph reads as body text. Size, weight and line spacing follow one continuous curve over the note's length, and scale with the column width like the images do.
 - Each note card is tall enough for all of its text, so nothing is cut off. A short note keeps a tile shape.
 - Click a note to edit it in place. The card lifts while you type and grows to fit. Enter or Esc finishes, Shift+Enter adds a line. Emptying a note removes it, and Undo brings it back.
 - While you type, the composer previews the note on the same curve.
@@ -91,7 +91,7 @@ Recommended editor setup: [VS Code](https://code.visualstudio.com/) with the [Ta
 - Confirmations appear as a small toast above the composer, with Undo when it applies.
 - A Keep on top button keeps the window above other apps.
 - Light and dark themes.
-- Runs fully offline. The font ships with the app.
+- Runs fully offline. The fonts ship with the app.
 
 ## Keyboard
 
@@ -154,7 +154,7 @@ While a board is open, its images sit unpacked in a working folder under the app
 
 ## Design direction
 
-- **Type:** Mona Sans, a variable font with adjustable width and weight, bundled in `src/fonts` under the SIL Open Font License. Titles are large and tight: 52px, weight 580, letter spacing -0.052em. Body text is 13.5px.
+- **Type:** Mona Sans for the interface, a variable font with adjustable width and weight. Notes are set in Geist. Both are bundled in `src/fonts` under the SIL Open Font License. Titles are large and tight: 52px, weight 580, letter spacing -0.052em. Body text is 13.5px.
 - **Colour:** a warm off-white light theme, a near-black dark theme, and one orange accent.
 
   | Token | Light | Dark |
