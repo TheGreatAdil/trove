@@ -1124,11 +1124,9 @@ async function refreshLibrary(paths = library) {
   renderSidebar();
 }
 
-let shownTitle = '';
+// The window title stays "Trove"; the board's name and unsaved state show in the header.
 function renderProject() {
   app.classList.toggle('dirty', project.dirty);
-  const title = `${project.dirty ? '*' : ''}${project.name} — Trove`;
-  if (title !== shownTitle) { shownTitle = title; document.title = title; appWindow.setTitle(title).catch(() => {}); }
 }
 
 // Every edit to the board goes through here.

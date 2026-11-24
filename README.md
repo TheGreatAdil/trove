@@ -44,7 +44,7 @@ Recommended editor setup: [VS Code](https://code.visualstudio.com/) with the [Ta
 - A board's name is stored inside its file, so the file can be called anything: `references.trv` can hold a board called Portfolio Site. Renaming a board (click its title) is an edit you save like any other, and never touches the file name. An unnamed board takes the file name you choose when you first save it. The board menu shows which file a board lives in.
 - The board menu (the `···` button in the header) has Rename, Save, Save as and Delete board. Delete moves the `.trv` file to the Recycle Bin (Trash on macOS and Linux) after a second click, so it can be restored. An unsaved board is discarded instead.
 - Double-click a `.trv` file to open it in Trove. If Trove is already running, the open window switches to that board.
-- Before switching boards or closing the window throws away unsaved work, Trove asks whether to save. Unsaved changes show as a dot on the board's row and next to its title, and as a `*` in the window title.
+- Before switching boards or closing the window throws away unsaved work, Trove asks whether to save. Unsaved changes show as a dot on the board's row and next to its title. The window title is always just "Trove".
 - The last board reopens when Trove starts.
 
 **Sidebar: your board library**
