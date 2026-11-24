@@ -16,9 +16,6 @@
 
 Trove is for designers, artists and anyone who gathers references while they work. Paste a screenshot, drop in files, paste a link, or just start typing, and it lands on the board. Each board is a single `.trv` file on your computer, with every image stored inside it. There's no account and no cloud, and it works offline.
 
-> [!NOTE]
-> Trove is early (version 0.1). It's developed and tested on Windows. macOS and Linux builds should work but haven't been tested much yet. There are no downloads yet, so for now you [build it from source](#building-from-source).
-
 ## Features
 
 - **Paste anything.** Images, screenshots, image links and files go straight onto the board. Images are copied into the board's file, so a `.trv` file is self-contained and you can move it, back it up or send it to someone.
@@ -84,25 +81,25 @@ The installers end up in `src-tauri/target/release/bundle/`. Installing Trove re
 
 On macOS, use Cmd instead of Ctrl.
 
-| Shortcut | Action |
-|---|---|
-| `Ctrl N` | New board |
-| `Ctrl O` | Open a board file |
-| `Ctrl S` | Save the board |
-| `Ctrl Shift S` | Save the board under a new name |
-| `Ctrl V` | Paste an image or link into the board |
-| Any letter | Start a note (`Enter` adds it, `Shift Enter` adds a line, `Esc` closes) |
-| `Ctrl K` | Search boards |
-| `Ctrl B` | Show or hide the sidebar |
-| `Ctrl Shift A` | Keep the window on top |
-| `Ctrl =` / `Ctrl -` | Bigger / smaller cards |
-| `Ctrl Z` | Restore the last removed card |
-| `Space` | Open the hovered card in focus view (`Space` or `Esc` closes it) |
-| `Enter` | Edit the hovered note (`Enter` or `Esc` finishes) |
-| `←` / `→` | Previous / next card in focus view |
-| `Delete` | Remove the hovered or focused card |
-| `Ctrl C` | Copy the hovered image or note |
-| `Esc` | Close a menu or focus view, or cancel a drag |
+| Shortcut            | Action                                                                  |
+| ------------------- | ----------------------------------------------------------------------- |
+| `Ctrl N`            | New board                                                               |
+| `Ctrl O`            | Open a board file                                                       |
+| `Ctrl S`            | Save the board                                                          |
+| `Ctrl Shift S`      | Save the board under a new name                                         |
+| `Ctrl V`            | Paste an image or link into the board                                   |
+| Any letter          | Start a note (`Enter` adds it, `Shift Enter` adds a line, `Esc` closes) |
+| `Ctrl K`            | Search boards                                                           |
+| `Ctrl B`            | Show or hide the sidebar                                                |
+| `Ctrl Shift A`      | Keep the window on top                                                  |
+| `Ctrl =` / `Ctrl -` | Bigger / smaller cards                                                  |
+| `Ctrl Z`            | Restore the last removed card                                           |
+| `Space`             | Open the hovered card in focus view (`Space` or `Esc` closes it)        |
+| `Enter`             | Edit the hovered note (`Enter` or `Esc` finishes)                       |
+| `←` / `→`           | Previous / next card in focus view                                      |
+| `Delete`            | Remove the hovered or focused card                                      |
+| `Ctrl C`            | Copy the hovered image or note                                          |
+| `Esc`               | Close a menu or focus view, or cancel a drag                            |
 
 ## Connecting AI agents (MCP)
 
@@ -116,17 +113,21 @@ claude mcp add --transport http trove http://127.0.0.1:8768/mcp/<secret>
 ```
 
 ```json
-{ "mcpServers": { "trove": { "type": "http", "url": "http://127.0.0.1:8768/mcp/<secret>" } } }
+{
+  "mcpServers": {
+    "trove": { "type": "http", "url": "http://127.0.0.1:8768/mcp/<secret>" }
+  }
+}
 ```
 
 Agents get four tools:
 
-| Tool | What it returns |
-|---|---|
+| Tool          | What it returns                                                                                             |
+| ------------- | ----------------------------------------------------------------------------------------------------------- |
 | `list_boards` | The open board (including unsaved changes) and every saved board in the sidebar, with note and image counts |
-| `get_board` | One board in order: every note's text, and each image's id, size, dominant colour, source link and date |
-| `get_image` | One image, scaled down to 1568px on its long edge by default (`max_size` changes that) |
-| `search` | Notes and image links containing some text, across all boards or one |
+| `get_board`   | One board in order: every note's text, and each image's id, size, dominant colour, source link and date     |
+| `get_image`   | One image, scaled down to 1568px on its long edge by default (`max_size` changes that)                      |
+| `search`      | Notes and image links containing some text, across all boards or one                                        |
 
 - **Private by default.** The server only listens on your own computer (`127.0.0.1`), only answers on the secret link, and turns away requests from web pages.
 - **Read-only.** Agents can't change, add or delete anything.
@@ -157,10 +158,23 @@ images/<id>.<ext>   every image on the board, in its original format
   "updatedAt": 1795996000000,
   "savedAt": 1795996800000,
   "items": [
-    { "id": "p0q8r7st", "file": "p0q8r7st.png", "w": 1600, "h": 1200,
-      "color": "rgb(182, 140, 101)", "tone": [201, 132, 74], "createdAt": 1795995000000, "pos": 1795995000000 },
-    { "id": "n4m2k8qa", "kind": "text", "text": "Warm greys. Never pure black.",
-      "createdAt": 1795995600000, "pos": 1795995600000 }
+    {
+      "id": "p0q8r7st",
+      "file": "p0q8r7st.png",
+      "w": 1600,
+      "h": 1200,
+      "color": "rgb(182, 140, 101)",
+      "tone": [201, 132, 74],
+      "createdAt": 1795995000000,
+      "pos": 1795995000000
+    },
+    {
+      "id": "n4m2k8qa",
+      "kind": "text",
+      "text": "Warm greys. Never pure black.",
+      "createdAt": 1795995600000,
+      "pos": 1795995600000
+    }
   ]
 }
 ```
