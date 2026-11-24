@@ -194,23 +194,34 @@ titleEl.addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); }
   if (e.key === 'Escape') { titleEl.textContent = activeBoard().name; titleEl.blur(); }
 });
+// Renames run one after another, and every board operation waits for them first
+// (see settleTitle): a save that started mid-rename used to write the board back
+// under its old name, leaving two files and two rows.
+let renaming = Promise.resolve();
 titleEl.addEventListener('blur', () => {
   const v = titleEl.textContent.replace(/\s+/g, ' ').trim();
-  if (v && v !== project.name) renameBoard(v);
+  if (v && v !== project.name) renaming = renaming.then(() => renameBoard(v));
   titleEl.textContent = project.name; renderHead();
   titleEl.scrollLeft = 0;
 });
 // A saved board's name is its file name, so renaming renames the file.
 async function renameBoard(name) {
   if (!project.path) { project.name = name; renderHead(); renderSidebar(); return; }
+  if (name === project.name) return;
   const from = project.path;
   try {
     const to = await invoke('project_rename', { path: from, name });
-    if (!samePath(from, project.path)) return; // switched boards meanwhile
-    project.path = to; project.name = baseName(to);
+    // The file has moved even if another board is open by now, so the library follows it.
     library = library.map(p => samePath(p, from) ? to : p); saveLibrary();
+    for (const [k, info] of libInfo) if (samePath(k, from)) { libInfo.delete(k); libInfo.set(to, { ...info, path: to }); }
+    if (samePath(from, project.path)) { project.path = to; project.name = baseName(to); }
   } catch (e) { toast(errMsg(e)); }
   renderHead(); renderSidebar();
+}
+// Lands a title edit (and its file rename) before anything reads or replaces the open board.
+async function settleTitle() {
+  if (document.activeElement === titleEl) titleEl.blur();
+  await renaming;
 }
 function focusTitle() {
   requestAnimationFrame(() => {
@@ -1170,7 +1181,7 @@ let busy = false;
 async function exclusive(fn) {
   if (busy) return;
   busy = true;
-  try { await fn(); }
+  try { await settleTitle(); await fn(); }
   catch (e) { console.error(e); toast(errMsg(e)); }
   finally { busy = false; }
 }
@@ -1213,7 +1224,7 @@ async function openProject(path) {
 
 // Resolves true once the board is safely on disk.
 async function saveProject({ as = false } = {}) {
-  if (document.activeElement === titleEl) titleEl.blur(); // keep a rename in progress
+  await settleTitle(); // a rename in progress lands first, so the save writes the new file
   let path = project.path;
   if (as || !path) {
     path = await dialog.save({ title: 'Save board', filters: FILTERS, defaultPath: project.path || `${safeFileName(project.name)}.trv` });
@@ -1275,7 +1286,7 @@ appWindow.onCloseRequested(async e => {
   if (busy) return;
   busy = true;
   let ok = false;
-  try { ok = await guardUnsaved(); } finally { busy = false; }
+  try { await settleTitle(); ok = await guardUnsaved(); } finally { busy = false; }
   if (ok) { closing = true; await appWindow.destroy(); }
 });
 
