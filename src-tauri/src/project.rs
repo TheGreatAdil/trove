@@ -1,28 +1,34 @@
-//! The `.trv` project format.
+//! The `.trv` project format. One project is one board.
 //!
 //! A `.trv` file is a zip archive:
 //!
 //! ```text
-//! project.json      boards, items and their metadata (written by the frontend)
-//! images/<id>.<ext> every image the project references, in its original format
+//! project.json      the board's items and their metadata (written by the frontend)
+//! images/<id>.<ext> every image the board references, in its original format
 //! ```
 //!
 //! While a project is open its images live unpacked in a session directory
 //! (`<session>/images/`), so the webview can show them straight from disk.
 //! Saving packs that directory back into a `.trv`.
+//!
+//! Version 1 files held several boards; they still open, as one board.
 
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
 use std::fs::{self, File};
+use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
+use serde::Serialize;
 use serde_json::Value;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 pub const EXTENSION: &str = "trv";
 const FORMAT: &str = "trove";
-const VERSION: u64 = 1;
+const VERSION: u64 = 2;
 const MANIFEST: &str = "project.json";
 const IMAGES: &str = "images";
 
@@ -165,6 +171,155 @@ pub fn extract(src: &Path, session: &Path) -> Result<Value, String> {
     Ok(manifest)
 }
 
+/// Turns a board name into a safe file name (without the extension).
+pub fn file_stem_for(name: &str) -> Result<String, String> {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if c.is_control() || "<>:\"/\\|?*".contains(c) { ' ' } else { c })
+        .collect();
+    let mut stem = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    stem = stem.trim_end_matches(['.', ' ']).to_string();
+    if stem.chars().count() > 120 {
+        stem = stem.chars().take(120).collect::<String>().trim_end().to_string();
+    }
+    if stem.is_empty() {
+        return Err("A board needs a name.".into());
+    }
+    // Windows reserves these names in every folder.
+    let upper = stem.to_ascii_uppercase();
+    let reserved = ["CON", "PRN", "AUX", "NUL"].contains(&upper.as_str())
+        || ((upper.starts_with("COM") || upper.starts_with("LPT"))
+            && upper.len() == 4
+            && upper.as_bytes()[3].is_ascii_digit());
+    if reserved {
+        stem.push_str(" board");
+    }
+    Ok(stem)
+}
+
+fn read_manifest_from<R: Read + io::Seek>(zip: &mut ZipArchive<R>) -> Result<Value, String> {
+    let damaged = |e: &dyn std::fmt::Display| format!("This project file is damaged: {e}");
+    let mut entry = zip.by_name(MANIFEST).map_err(|_| damaged(&"project.json is missing"))?;
+    let mut json = String::new();
+    entry.read_to_string(&mut json).map_err(|e| damaged(&e))?;
+    let manifest = serde_json::from_str::<Value>(&json).map_err(|e| damaged(&e))?;
+    check_manifest(&manifest)?;
+    Ok(manifest)
+}
+
+fn open_zip(path: &Path) -> Result<ZipArchive<File>, String> {
+    let file = File::open(path).map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound => "That project file no longer exists.".to_string(),
+        _ => format!("Couldn't open the project: {e}"),
+    })?;
+    ZipArchive::new(file).map_err(|_| "This isn't a Trove project file.".to_string())
+}
+
+/// Edits a saved `.trv` without opening it: `edit` changes the manifest, images
+/// it now references are copied from the archive itself or from
+/// `<add_from>/images/`, and images nothing references any more are dropped.
+pub fn update(path: &Path, add_from: &Path, edit: impl FnOnce(&mut Value)) -> Result<(), String> {
+    let mut src = open_zip(path)?;
+    let mut manifest = read_manifest_from(&mut src)?;
+    edit(&mut manifest);
+    manifest["version"] = Value::from(VERSION);
+
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    let result = (|| -> zip::result::ZipResult<()> {
+        let mut out = ZipWriter::new(File::create(&tmp)?);
+        let deflated = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let stored = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .large_file(true);
+        out.start_file(MANIFEST, deflated)?;
+        out.write_all(&serde_json::to_vec_pretty(&manifest).map_err(io::Error::from)?)?;
+        for name in referenced_images(&manifest) {
+            let entry_name = format!("{IMAGES}/{name}");
+            if let Ok(entry) = src.by_name(&entry_name) {
+                out.raw_copy_file(entry)?;
+            } else if let Ok(mut image) = File::open(images_dir(add_from).join(&name)) {
+                out.start_file(entry_name, stored)?;
+                io::copy(&mut image, &mut out)?;
+            }
+        }
+        out.finish()?.sync_all()?;
+        Ok(())
+    })();
+    drop(src);
+    match result {
+        Ok(()) => fs::rename(&tmp, path).map_err(|e| format!("Couldn't update the board: {e}")),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            Err(format!("Couldn't update the board: {e}"))
+        }
+    }
+}
+
+/// What the sidebar shows for a board file, read without opening the board.
+#[derive(Serialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Info {
+    pub path: String,
+    pub count: usize,
+    pub updated_at: f64,
+    /// An image from the board, unpacked into the thumbnail cache.
+    pub thumb: Option<String>,
+    pub color: Option<String>,
+    pub error: Option<String>,
+}
+
+fn sort_key(item: &Value) -> f64 {
+    item.get("pos").or_else(|| item.get("createdAt")).and_then(Value::as_f64).unwrap_or(0.0)
+}
+
+pub fn info(path: &Path, thumbs: &Path) -> Info {
+    let mut out = Info { path: path.display().to_string(), ..Default::default() };
+    let mtime = fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as f64);
+    let result = (|| -> Result<(), String> {
+        let mut zip = open_zip(path)?;
+        let manifest = read_manifest_from(&mut zip)?;
+        let items = manifest.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
+        out.count = items.len();
+        out.updated_at = ["updatedAt", "savedAt"]
+            .iter()
+            .find_map(|k| manifest.get(*k).and_then(Value::as_f64))
+            .or(mtime)
+            .unwrap_or(0.0);
+        // The cover is the board's first image, in board order (newest first).
+        let cover = items
+            .iter()
+            .filter(|i| i.get("file").and_then(Value::as_str).is_some_and(is_safe_name))
+            .max_by(|a, b| sort_key(a).total_cmp(&sort_key(b)));
+        if let Some(cover) = cover {
+            out.color = cover.get("color").and_then(Value::as_str).map(String::from);
+            let name = cover["file"].as_str().unwrap_or_default();
+            let mut hasher = DefaultHasher::new();
+            (path, mtime.unwrap_or(0.0).to_bits(), name).hash(&mut hasher);
+            let ext = name.rsplit_once('.').map(|(_, e)| e).unwrap_or("img");
+            let dest = thumbs.join(format!("{:016x}.{ext}", hasher.finish()));
+            if !dest.exists() {
+                fs::create_dir_all(thumbs).map_err(|e| e.to_string())?;
+                let mut entry = zip.by_name(&format!("{IMAGES}/{name}")).map_err(|e| e.to_string())?;
+                let mut file = File::create(&dest).map_err(|e| e.to_string())?;
+                io::copy(&mut entry, &mut file).map_err(|e| e.to_string())?;
+            }
+            out.thumb = Some(dest.display().to_string());
+        }
+        Ok(())
+    })();
+    if let Err(e) = result {
+        out.error = Some(e);
+        out.updated_at = mtime.unwrap_or(0.0);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,6 +405,66 @@ mod tests {
         assert!(write(&root.join("z.trv"), &newer, &root).unwrap_err().contains("newer version"));
 
         assert!(extract(&root.join("missing.trv"), &root.join("s")).unwrap_err().contains("no longer exists"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn board_names_become_safe_file_names() {
+        assert_eq!(file_stem_for("  Slow   light ").unwrap(), "Slow light");
+        assert_eq!(file_stem_for("a/b:c*d?").unwrap(), "a b c d");
+        assert_eq!(file_stem_for("Draft...").unwrap(), "Draft");
+        assert_eq!(file_stem_for("con").unwrap(), "con board");
+        assert_eq!(file_stem_for("COM3").unwrap(), "COM3 board");
+        assert_eq!(file_stem_for("Comics").unwrap(), "Comics");
+        assert!(file_stem_for(" / ").is_err());
+        assert_eq!(file_stem_for(&"x".repeat(300)).unwrap().len(), 120);
+    }
+
+    #[test]
+    fn update_moves_items_between_saved_boards() {
+        let root = temp_dir("update");
+        let session = root.join("open");
+        fs::create_dir_all(images_dir(&session)).unwrap();
+        fs::write(images_dir(&session).join("a.png"), b"aaa").unwrap();
+        fs::write(images_dir(&session).join("b.jpg"), b"bbb").unwrap();
+        let board = root.join("Other.trv");
+        let manifest = json!({ "format": "trove", "version": 2, "items": [
+            { "id": "a", "file": "a.png", "pos": 1, "color": "rgb(1, 2, 3)" }
+        ]});
+        write(&board, &manifest, &session).unwrap();
+
+        // Add an image and a note that only exist in the open session.
+        update(&board, &session, |m| {
+            let items = m["items"].as_array_mut().unwrap();
+            items.push(json!({ "id": "b", "file": "b.jpg", "pos": 5 }));
+            items.push(json!({ "id": "t", "kind": "text", "text": "hello", "pos": 3 }));
+        })
+        .unwrap();
+        let out = root.join("check1");
+        let m = extract(&board, &out).unwrap();
+        assert_eq!(m["items"].as_array().unwrap().len(), 3);
+        assert_eq!(fs::read(images_dir(&out).join("a.png")).unwrap(), b"aaa");
+        assert_eq!(fs::read(images_dir(&out).join("b.jpg")).unwrap(), b"bbb");
+
+        // Removing an item drops its image from the archive.
+        update(&board, &session, |m| {
+            m["items"].as_array_mut().unwrap().retain(|i| i["id"] != "b");
+        })
+        .unwrap();
+        let out = root.join("check2");
+        extract(&board, &out).unwrap();
+        assert!(!images_dir(&out).join("b.jpg").exists());
+        assert!(images_dir(&out).join("a.png").exists());
+
+        // The sidebar summary: count, and the newest image as the cover.
+        let thumbs = root.join("thumbs");
+        let summary = info(&board, &thumbs);
+        assert_eq!(summary.error, None);
+        assert_eq!(summary.count, 2);
+        assert_eq!(fs::read(summary.thumb.unwrap()).unwrap(), b"aaa");
+        assert_eq!(summary.color.as_deref(), Some("rgb(1, 2, 3)"));
+        assert!(info(&root.join("nope.trv"), &thumbs).error.unwrap().contains("no longer exists"));
+
         fs::remove_dir_all(&root).unwrap();
     }
 }

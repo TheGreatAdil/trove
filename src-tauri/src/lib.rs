@@ -121,6 +121,75 @@ async fn project_save(state: State<'_, Mutex<Session>>, path: String, manifest: 
     Ok(Saved { path: path.display().to_string(), missing })
 }
 
+fn now_ms() -> f64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as f64).unwrap_or_default()
+}
+
+/// Sidebar summaries (count, last update, cover thumbnail) for saved boards.
+#[tauri::command]
+async fn library_info(app: AppHandle, paths: Vec<String>) -> CmdResult<Vec<project::Info>> {
+    let thumbs = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("thumbs");
+    Ok(paths
+        .iter()
+        .map(|p| match trv_path(p) {
+            Ok(path) => project::info(&path, &thumbs),
+            Err(e) => project::Info { path: p.clone(), error: Some(e), ..Default::default() },
+        })
+        .collect())
+}
+
+/// Renames a board's file to match its new name. Returns the new path.
+#[tauri::command]
+async fn project_rename(path: String, name: String) -> CmdResult<String> {
+    let from = trv_path(&path)?;
+    let stem = project::file_stem_for(&name)?;
+    let to = from.with_file_name(format!("{stem}.{}", project::EXTENSION));
+    if to == from {
+        return Ok(path);
+    }
+    let only_case_changed = to.to_string_lossy().to_lowercase() == from.to_string_lossy().to_lowercase();
+    if to.exists() && !only_case_changed {
+        return Err(format!("There's already a board called “{stem}” in that folder."));
+    }
+    std::fs::rename(&from, &to).map_err(|e| format!("Couldn't rename the board: {e}"))?;
+    Ok(to.display().to_string())
+}
+
+/// Adds items from the open board to another, saved board (drag onto a board
+/// in the sidebar). Their images are copied from the open board's folder.
+#[tauri::command]
+async fn project_add_items(state: State<'_, Mutex<Session>>, path: String, items: Vec<Value>) -> CmdResult<()> {
+    let path = trv_path(&path)?;
+    let session = current_session(&state)?;
+    let now = now_ms();
+    project::update(&path, &session, |m| {
+        if !m["items"].is_array() {
+            m["items"] = Value::Array(Vec::new());
+        }
+        let list = m["items"].as_array_mut().expect("items is an array");
+        for item in items {
+            if !list.iter().any(|i| i.get("id").is_some() && i.get("id") == item.get("id")) {
+                list.push(item);
+            }
+        }
+        m["updatedAt"] = Value::from(now);
+    })
+}
+
+/// Takes items back out of a saved board (undoing a move).
+#[tauri::command]
+async fn project_remove_items(state: State<'_, Mutex<Session>>, path: String, ids: Vec<String>) -> CmdResult<()> {
+    let path = trv_path(&path)?;
+    let session = current_session(&state)?;
+    let now = now_ms();
+    project::update(&path, &session, |m| {
+        if let Some(list) = m["items"].as_array_mut() {
+            list.retain(|i| !i.get("id").and_then(Value::as_str).is_some_and(|id| ids.iter().any(|x| x == id)));
+        }
+        m["updatedAt"] = Value::from(now);
+    })
+}
+
 /// Moves a `.trv` to the Recycle Bin / Trash, so a delete can be undone there.
 #[tauri::command]
 async fn project_delete(path: String) -> CmdResult<()> {
@@ -214,6 +283,10 @@ pub fn run() {
             project_open,
             project_save,
             project_delete,
+            project_rename,
+            project_add_items,
+            project_remove_items,
+            library_info,
             image_put,
             image_read,
             take_launch_path,
